@@ -28,7 +28,7 @@ Import it in your Dart code:
 import 'package:typed_config_riverpod/typed_config_riverpod.dart';
 ```
 
-*(Note: `typed_config_riverpod` automatically re-exports `typed_config`, so you do not need to import both).*
+_(Note: `typed_config_riverpod` automatically re-exports `typed_config`, so you do not need to import both)._
 
 ## Usage
 
@@ -37,14 +37,18 @@ import 'package:typed_config_riverpod/typed_config_riverpod.dart';
 Grouping providers inside an `abstract final class` is **optional but recommended** for clean namespacing and IDE autocompletion (e.g. typing `AppConfig.` reveals all providers):
 
 ```dart
+enum ThemeMode { system, light, dark }
+
+// Grouping configs inside an abstract final class is optional, but recommended
+// for clean namespacing and IDE autocomplete (e.g. typing `AppConfig.` reveals all settings).
 abstract final class AppConfig {
   static final volumeProvider = configEntryProvider<double>(
-    key: 'audio.volume',
+    key: 'volume',
     defaultValue: 0.8,
   );
 
   static final themeModeProvider = configEntryProvider<ThemeMode>(
-    key: 'ui.themeMode',
+    key: 'themeMode',
     defaultValue: ThemeMode.system,
     fromJson: (j) => ThemeMode.values.byName(j as String),
     toJson: (m) => m.name,
@@ -105,4 +109,4 @@ ref.read(AppConfig.volumeProvider.notifier).reset();
 ## Additional information
 
 - **Core Engine:** For documentation on disk persistence, migrations, and corrupt recovery, see [`typed_config`](https://pub.dev/packages/typed_config).
-- **Issues & Feedback:** File bug reports on [GitHub Issues](https://github.com/my_org/typed_config/issues).
+- **Issues & Feedback:** File bug reports on [GitHub Issues](https://github.com/jpangestu/typed_config/issues).

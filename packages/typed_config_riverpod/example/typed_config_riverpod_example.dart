@@ -5,8 +5,8 @@ import 'package:typed_config_riverpod/typed_config_riverpod.dart';
 
 enum ThemeMode { system, light, dark }
 
-// Grouping providers inside an abstract final class is optional, but recommended
-// for clean namespacing and IDE autocomplete (e.g. typing `AppConfig.` reveals all providers).
+// Grouping configs inside an abstract final class is optional, but recommended
+// for clean namespacing and IDE autocomplete (e.g. typing `AppConfig.` reveals all settings).
 abstract final class AppConfig {
   static final volumeProvider = configEntryProvider<double>(
     key: 'volume',

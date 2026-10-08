@@ -1,7 +1,8 @@
 name: typed_config_riverpod
 description: Riverpod integration and fine-grained reactive providers for typed_config.
-version: 0.1.0
-# repository: https://github.com/my_org/typed_config/tree/main/packages/typed_config_riverpod
+version: 0.1.1
+repository: https://github.com/jpangestu/typed_config/tree/main/packages/typed_config_riverpod
+issue_tracker: https://github.com/jpangestu/typed_config/issues
 
 environment:
   sdk: ^3.13.4

@@ -1,7 +1,8 @@
 name: typed_config
 description: A type-safe key-value store for application configurations with synchronous in-memory reads and disk persistence.
-version: 0.1.0
-# repository: https://github.com/my_org/typed_config/tree/main/packages/typed_config
+version: 0.1.1
+repository: https://github.com/jpangestu/typed_config/tree/main/packages/typed_config
+issue_tracker: https://github.com/jpangestu/typed_config/issues
 
 environment:
   sdk: ^3.13.4

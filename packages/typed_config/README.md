@@ -38,14 +38,16 @@ import 'package:typed_config/typed_config.dart';
 Define settings as typed `ConfigEntry` objects. Grouping them inside an `abstract final class` is **optional but recommended** for clean namespacing and IDE autocompletion (e.g. typing `AppConfig.` reveals all settings):
 
 ```dart
+enum ThemeMode { system, light, dark }
+
+// Grouping configs inside an abstract final class is optional, but recommended
+// for clean namespacing and IDE autocomplete (e.g. typing `AppConfig.` reveals all settings).
 abstract final class AppConfig {
-  // Primitives
   static const volume = ConfigEntry<double>(key: 'volume', defaultValue: 0.8);
 
-  // Enums
   static final themeMode = ConfigEntry<ThemeMode>(
-    key: 'ui.themeMode',
-    defaultValue: ThemeMode.dark,
+    key: 'themeMode',
+    defaultValue: ThemeMode.system,
     fromJson: (j) => ThemeMode.values.byName(j as String),
     toJson: (m) => m.name,
   );
@@ -84,7 +86,7 @@ void main() async {
 ### 3. Read and write settings
 
 ```dart
-// Synchronous frame-0 read (no await, no FutureBuilder, no spinners)
+// Synchronous read (no await, no FutureBuilder, no spinners)
 final currentVolume = config.get(AppConfig.volume);
 
 // Update (immediate in memory, debounced in disk save)
@@ -104,5 +106,5 @@ config.watch(AppConfig.volume).listen((newVolume) {
 
 ## Additional information
 
-- **Issues & Feedback:** File bug reports and feature requests on [GitHub Issues](https://github.com/my_org/typed_config/issues).
+- **Issues & Feedback:** File bug reports and feature requests on [GitHub Issues](https://github.com/jpangestu/typed_config/issues).
 - **Contributing:** Pull requests are welcome! Please ensure all tests pass by running `dart test`.
