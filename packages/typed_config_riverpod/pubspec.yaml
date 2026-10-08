@@ -1,0 +1,19 @@
+name: typed_config_riverpod
+description: Riverpod integration and fine-grained reactive providers for typed_config.
+version: 0.1.0
+# repository: https://github.com/my_org/typed_config/tree/main/packages/typed_config_riverpod
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  riverpod: ^3.4.3
+  typed_config: ^0.1.0
+
+dependency_overrides:
+  typed_config:
+    path: ../typed_config
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.32.0

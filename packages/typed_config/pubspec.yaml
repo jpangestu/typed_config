@@ -1,0 +1,16 @@
+name: typed_config
+description: A type-safe key-value store for application configurations with synchronous in-memory reads and disk persistence.
+version: 0.1.0
+# repository: https://github.com/my_org/typed_config/tree/main/packages/typed_config
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  collection: ^1.19.1
+  meta: ^1.19.0
+  path: ^1.9.1
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.32.0
