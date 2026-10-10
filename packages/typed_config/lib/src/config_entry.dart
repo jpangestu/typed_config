@@ -76,9 +76,7 @@ class const ConfigEntry<T>({
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is ConfigEntry<T> &&
-          runtimeType == other.runtimeType &&
-          key == other.key;
+      other is ConfigEntry<T> && runtimeType == other.runtimeType && key == other.key;
 
   @override
   int get hashCode => key.hashCode;

@@ -1,1 +1,8 @@
 include: package:lints/recommended.yaml  
+
+linter:
+  rules:
+    - directives_ordering
+
+formatter:
+  page_width: 100

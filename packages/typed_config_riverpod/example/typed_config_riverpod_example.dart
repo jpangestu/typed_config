@@ -8,10 +8,7 @@ enum ThemeMode { system, light, dark }
 // Grouping configs inside an abstract final class is optional, but recommended
 // for clean namespacing and IDE autocomplete (e.g. typing `AppConfig.` reveals all settings).
 abstract final class AppConfig {
-  static final volumeProvider = configEntryProvider<double>(
-    key: 'volume',
-    defaultValue: 0.8,
-  );
+  static final volumeProvider = configEntryProvider<double>(key: 'volume', defaultValue: 0.8);
 
   static final themeModeProvider = configEntryProvider<ThemeMode>(
     key: 'themeMode',
@@ -29,9 +26,7 @@ void main() async {
   final config = await Config.load(configFile);
 
   // Set up Riverpod container with configProvider override
-  final container = ProviderContainer(
-    overrides: [configProvider.overrideWithValue(config)],
-  );
+  final container = ProviderContainer(overrides: [configProvider.overrideWithValue(config)]);
 
   // Synchronous read
   print('Initial volume: ${container.read(AppConfig.volumeProvider)}'); // 0.8

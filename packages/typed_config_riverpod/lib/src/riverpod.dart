@@ -59,8 +59,6 @@ NotifierProvider<ConfigNotifier<T>, T> configEntryProvider<T>({
 }
 
 /// Creates a persistent [NotifierProvider] from an existing [ConfigEntry].
-NotifierProvider<ConfigNotifier<T>, T> configEntryProviderFromEntry<T>(
-  ConfigEntry<T> entry,
-) {
+NotifierProvider<ConfigNotifier<T>, T> configEntryProviderFromEntry<T>(ConfigEntry<T> entry) {
   return NotifierProvider<ConfigNotifier<T>, T>(() => ConfigNotifier<T>(entry));
 }

@@ -10,14 +10,10 @@ import 'config_entry.dart';
 /// Function signature for migrating raw configuration JSON maps between schema versions.
 typedef ConfigMigrator = void Function(Map<String, dynamic> raw);
 
-const MapEquality<String, dynamic> _mapEquality =
-    MapEquality<String, dynamic>();
+const MapEquality<String, dynamic> _mapEquality = MapEquality<String, dynamic>();
 
 /// Recursively flattens a nested map into a flat map with dot-separated keys.
-Map<String, dynamic> flattenConfigMap(
-  Map<String, dynamic> nested, [
-  String prefix = '',
-]) {
+Map<String, dynamic> flattenConfigMap(Map<String, dynamic> nested, [String prefix = '']) {
   final result = <String, dynamic>{};
   for (final entry in nested.entries) {
     final fullKey = prefix.isEmpty ? entry.key : '$prefix.${entry.key}';
@@ -93,8 +89,7 @@ class Config([
   final Map<String, dynamic> _cache = initialCache != null
       ? flattenConfigMap(initialCache)
       : <String, dynamic>{};
-  final StreamController<String> _keyChanges =
-      StreamController<String>.broadcast();
+  final StreamController<String> _keyChanges = StreamController<String>.broadcast();
   final void Function(String message)? _onLog = onLog;
   final void Function(Object error, StackTrace stackTrace)? _onError = onError;
 
@@ -133,9 +128,9 @@ class Config([
     }
   }
 
-  // ========================================================================================================
+  // ==============================================================================================
   // Core Engine Operations
-  // ========================================================================================================
+  // ==============================================================================================
 
   /// Check whether [entry] has an explicitly stored value in the cache.
   bool contains<T>(ConfigEntry<T> entry) => _cache.containsKey(entry.key);
@@ -179,7 +174,8 @@ class Config([
     _scheduleSave();
   }
 
-  /// Clears all configuration overrides, reverts all entries to defaults, and flushes to disk immediately.
+  /// Clears all configuration overrides, reverts all entries to defaults,
+  /// and flushes to disk immediately.
   ///
   /// Emits a wildcard change notifying all active [watch] listeners.
   Future<void> resetAll() async {
@@ -199,18 +195,15 @@ class Config([
         .map((_) => get(entry));
   }
 
-  // ========================================================================================================
+  // ==============================================================================================
   // Disk Writes & External Reload
-  // ========================================================================================================
+  // ==============================================================================================
 
   /// Schedules saving to disk after 300ms of inactivity.
   void _scheduleSave() {
     if (_file == null) return;
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(
-      const Duration(milliseconds: 300),
-      () => unawaited(flush()),
-    );
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () => unawaited(flush()));
   }
 
   /// Immediately writes in-memory configuration changes to disk without waiting for the debounce timer.
@@ -238,10 +231,7 @@ class Config([
       try {
         final flatMap = Map<String, dynamic>.from(_cache);
         final nestedMap = unflattenConfigMap(flatMap);
-        final jsonString = JsonEncoder.withIndent(
-          '  ',
-          (o) => o.toString(),
-        ).convert(nestedMap);
+        final jsonString = JsonEncoder.withIndent('  ', (o) => o.toString()).convert(nestedMap);
 
         if (!file.parent.existsSync()) {
           file.parent.createSync(recursive: true);
@@ -294,8 +284,7 @@ class Config([
         if (p.basename(event.path) == p.basename(file.path) &&
             event.type != FileSystemEvent.delete) {
           final lastWrite = _lastInternalWriteTime;
-          if (lastWrite != null &&
-              DateTime.now().difference(lastWrite).inMilliseconds < 1000) {
+          if (lastWrite != null && DateTime.now().difference(lastWrite).inMilliseconds < 1000) {
             // Ignore internal write echo
             return;
           }
@@ -324,9 +313,7 @@ class Config([
                 for (final k in changedKeys) {
                   _notifyKey(k);
                 }
-                _log(
-                  'Reloaded from disk modification: ${changedKeys.join(", ")}',
-                );
+                _log('Reloaded from disk modification: ${changedKeys.join(", ")}');
               }
             } catch (e) {
               _log('Ignored corrupted external config.json update: $e');
@@ -355,8 +342,7 @@ class Config([
       final changedKeys = <String>{};
 
       for (final entry in flatDecoded.entries) {
-        if (!_cache.containsKey(entry.key) ||
-            _cache[entry.key] != entry.value) {
+        if (!_cache.containsKey(entry.key) || _cache[entry.key] != entry.value) {
           changedKeys.add(entry.key);
         }
       }
@@ -379,10 +365,7 @@ class Config([
   }
 
   /// Safely renames or copies a corrupted file to [file.path].corrupt.
-  static Future<void> _quarantineFile(
-    File file,
-    void Function(String message)? log,
-  ) async {
+  static Future<void> _quarantineFile(File file, void Function(String message)? log) async {
     if (!file.existsSync()) return;
     try {
       final corruptFile = File('${file.path}.corrupt');
@@ -421,8 +404,7 @@ class Config([
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) async {
-    final logger =
-        onLog ?? (_kDebugMode ? (msg) => print('[Config] $msg') : null);
+    final logger = onLog ?? (_kDebugMode ? (msg) => print('[Config] $msg') : null);
 
     if (!configFile.existsSync()) {
       final initialData = <String, dynamic>{schemaVersionKey: schemaVersion};
@@ -466,9 +448,7 @@ class Config([
       final config = Config(configFile, flatDecoded, onLog, onError);
       if (needsFlush) {
         await config.flush();
-        config._log(
-          'Migrated config schema from v$fileVersion to v$schemaVersion.',
-        );
+        config._log('Migrated config schema from v$fileVersion to v$schemaVersion.');
       }
       config._startWatcher();
       return config;
@@ -476,11 +456,7 @@ class Config([
       await _quarantineFile(configFile, logger);
       final initialData = <String, dynamic>{schemaVersionKey: schemaVersion};
       final config = Config(configFile, initialData, onLog, onError);
-      config._logError(
-        'Failed to load existing config. Resetting to defaults.',
-        e,
-        s,
-      );
+      config._logError('Failed to load existing config. Resetting to defaults.', e, s);
       await config.flush();
       config._startWatcher();
       return config;
@@ -517,8 +493,7 @@ class Config([
   }
 
   /// Returns an unmodifiable snapshot map of all configuration entries in memory.
-  Map<String, dynamic> toFlatJson() =>
-      Map<String, dynamic>.unmodifiable(_cache);
+  Map<String, dynamic> toFlatJson() => Map<String, dynamic>.unmodifiable(_cache);
 
   /// Returns the nested unflattened JSON map as it would appear on disk.
   Map<String, dynamic> toJson() => unflattenConfigMap(_cache);

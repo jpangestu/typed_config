@@ -17,9 +17,7 @@ abstract final class AppConfig {
 }
 
 void main() async {
-  final tempDir = await Directory.systemTemp.createTemp(
-    'typed_config_example_',
-  );
+  final tempDir = await Directory.systemTemp.createTemp('typed_config_example_');
   final configFile = File('${tempDir.path}/config.json');
 
   // Initialize once
@@ -27,9 +25,7 @@ void main() async {
 
   // Synchronous read
   print('Initial volume: ${config.get(AppConfig.volume)}'); // 0.8
-  print(
-    'Initial theme: ${config.get(AppConfig.themeMode)}',
-  ); // ThemeMode.system
+  print('Initial theme: ${config.get(AppConfig.themeMode)}'); // ThemeMode.system
 
   // Update value (immediate in memory, debounced in disk save)
   config.set(AppConfig.volume, 0.95);
