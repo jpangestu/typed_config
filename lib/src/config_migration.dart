@@ -1,6 +1,7 @@
 import 'package:meta/meta.dart';
 
 /// Key used in JSON storage to track the current configuration schema version.
+@internal
 const String schemaVersionKey = 'schemaVersion';
 
 /// Context passed to [ConfigMigrator] callbacks containing the current configuration
@@ -101,6 +102,7 @@ typedef ConfigMigrator = void Function(ConfigMigrationContext m);
 ///
 /// Throws [ArgumentError] if [targetVersion] is less than 1.
 /// Throws [ConfigMigrationException] if any migration step throws an error.
+@internal
 ConfigMigrationResult migrateConfigData({
   required Map<String, dynamic> data,
   required int targetVersion,
@@ -189,7 +191,7 @@ ConfigMigrationResult migrateConfigData({
 
 /// The result of running schema migrations on configuration data.
 @immutable
-class ConfigMigrationResult {
+final class ConfigMigrationResult {
   /// The resulting flattened configuration data after applying all migrations.
   final Map<String, dynamic> data;
 
@@ -212,7 +214,7 @@ class ConfigMigrationResult {
 }
 
 /// Exception thrown when a configuration schema migration step fails.
-class ConfigMigrationException implements Exception {
+final class ConfigMigrationException implements Exception {
   /// The schema version of the data prior to starting the migration sequence.
   final int fromVersion;
 
@@ -245,6 +247,7 @@ class ConfigMigrationException implements Exception {
 ///
 /// Returns [value] as a positive integer, or `1` if [value] is missing, null,
 /// non-numeric, or less than 1.
+@internal
 int parseSchemaVersion(dynamic value) {
   if (value is int && value >= 1) return value;
   if (value is num && value >= 1) return value.toInt();
@@ -256,6 +259,7 @@ int parseSchemaVersion(dynamic value) {
 }
 
 /// Recursively flattens a nested map into a flat map with dot-separated keys.
+@internal
 Map<String, dynamic> flattenConfigMap(Map<dynamic, dynamic> nested, [String prefix = '']) {
   final result = <String, dynamic>{};
 
@@ -277,6 +281,7 @@ Map<String, dynamic> flattenConfigMap(Map<dynamic, dynamic> nested, [String pref
 }
 
 /// Recursively un-flattens a flat map with dot-separated keys into a nested map structure.
+@internal
 Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
   final result = <String, dynamic>{};
 

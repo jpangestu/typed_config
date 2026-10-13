@@ -13,9 +13,7 @@ final class ConfigEntry<T> {
   /// Fallback value returned when the entry is absent or invalid in storage.
   final T defaultValue;
 
-  /// Reference to the backing [ConfigEngine].
-  @internal
-  final ConfigEngine engine;
+  final ConfigEngine _engine;
 
   /// Optional deserializer to convert raw JSON into [T].
   final T Function(dynamic json)? fromJson;
@@ -27,17 +25,17 @@ final class ConfigEntry<T> {
   ConfigEntry({
     required this.key,
     required this.defaultValue,
-    required this.engine,
+    required ConfigEngine engine,
     this.fromJson,
     this.toJson,
-  });
+  }) : _engine = engine;
 
   /// Synchronously returns the typed value from memory.
   ///
   /// Falls back to [defaultValue] if the entry is not explicitly set in the cache.
   T get value {
-    final raw = engine.readRaw(key);
-    if (raw == null && !engine.containsKey(key)) {
+    final raw = _engine.readRaw(key);
+    if (raw == null && !_engine.containsKey(key)) {
       return defaultValue;
     }
     return parse(raw);
@@ -45,21 +43,21 @@ final class ConfigEntry<T> {
 
   /// Updates this setting in memory immediately and schedules a debounced disk save.
   set value(T newValue) {
-    engine.writeRaw(key, serialize(newValue));
+    _engine.writeRaw(key, serialize(newValue));
   }
 
   /// Reverts this setting back to [defaultValue] and schedules a disk save.
   void reset() {
-    engine.resetKey(key);
+    _engine.resetKey(key);
   }
 
   /// Whether this entry has an explicitly stored value in memory.
-  bool get isModified => engine.containsKey(key);
+  bool get isModified => _engine.containsKey(key);
 
   /// Broadcast stream that emits the latest typed value whenever this entry changes.
   ///
   /// Ignores changes to unrelated entries.
-  Stream<T> get changes => engine.watchKey(key).map((_) => value);
+  Stream<T> get changes => _engine.watchKey(key).map((_) => value);
 
   /// Parses raw JSON into [T], safely falling back to [defaultValue].
   T parse(dynamic json) {

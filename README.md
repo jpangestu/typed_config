@@ -174,7 +174,7 @@ You can bridge typed_config into Riverpod with this lightweight extension, allow
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:typed_config/typed_config.dart';
 
-final _entryProviderCache = Expando<NotifierProvider<ConfigEntryNotifier<dynamic>, dynamic>>();
+final _entryProviderCache = Expando<Object>();
 
 /// A Riverpod [Notifier] that synchronizes a single [ConfigEntry].
 class ConfigEntryNotifier<T> extends Notifier<T> {
@@ -190,6 +190,12 @@ class ConfigEntryNotifier<T> extends Notifier<T> {
     ref.onDispose(sub.cancel);
     return _entry.value;
   }
+
+  /// Sets a new value in memory and schedules a debounced disk save.
+  void set(T value) => _entry.value = value;
+
+  /// Reverts this setting back to its default value.
+  void reset() => _entry.reset();
 }
 
 /// Riverpod extension providing fine-grained, zero-boilerplate providers for [ConfigEntry].

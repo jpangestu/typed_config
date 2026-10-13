@@ -49,9 +49,11 @@ class Config {
   File? get file => _engine?.file;
 
   /// The active in-memory cache of flattened configuration entries.
+  @internal
   Map<String, dynamic> get cache => engine.cache;
 
   /// Broadcast stream controller notifying key mutations.
+  @internal
   StreamController<String> get keyChanges => engine.keyChanges;
 
   /// Custom logger callback.
@@ -63,11 +65,14 @@ class Config {
   /// Whether this config instance has been disposed.
   bool get isDisposed => _engine?.isDisposed ?? false;
 
-  /// The root builder for declaring configuration entries.
-  ConfigBuilder get builder => ConfigBuilder(engine);
+  /// The namespace prefix of this configuration group, or empty string `''` for root.
+  final String prefix;
 
-  /// Creates a [Config] instance. When passed a [ConfigBuilder], binds directly to its engine.
-  Config([ConfigBuilder? initialBuilder]) {
+  /// The builder for declaring configuration entries within this group's namespace.
+  ConfigBuilder get builder => ConfigBuilder(engine, prefix);
+
+  /// Creates a [Config] instance. When passed a [ConfigBuilder], binds directly to its engine and prefix.
+  Config([ConfigBuilder? initialBuilder]) : prefix = initialBuilder?.prefix ?? '' {
     if (initialBuilder != null) {
       _engine = initialBuilder.engine;
     }
