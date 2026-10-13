@@ -274,13 +274,9 @@ void main() {
         configFile,
         schemaVersion: 2,
         migrations: {
-          2: (raw) {
-            if (raw.containsKey('theme')) {
-              raw['ui.themeMode'] = raw.remove('theme');
-            }
-            if (raw.containsKey('vol')) {
-              raw['audio.volume'] = raw.remove('vol');
-            }
+          2: (m) {
+            m.rename('theme', 'ui.themeMode');
+            m.rename('vol', 'audio.volume');
           },
         },
       );
@@ -303,8 +299,8 @@ void main() {
         configFile,
         schemaVersion: 3,
         migrations: {
-          2: (raw) => raw['val'] = (raw['val'] as int) + 5,
-          3: (raw) => raw['val'] = (raw['val'] as int) * 2,
+          2: (m) => m['val'] = (m['val'] as int) + 5,
+          3: (m) => m['val'] = (m['val'] as int) * 2,
         },
       );
       addTearDown(config.dispose);

@@ -6,7 +6,8 @@
 - **In-Memory Testing:** First-class support for in-memory testing without file I/O via `Config.inMemory(AppConfig.new)`.
 - **Zero-Boilerplate Enums & Lists:** Added `builder.define(...)`, `builder.defineEnum(...)`, and `builder.defineList(...)`.
 - **API Simplification:** Removed legacy `config.get()`, `config.set()`, `config.reset()`, and `config.watch()` methods in favor of direct handle operations.
-- **Clean Public Surface & Aliases:** Streamlined exports to `Config`, `ConfigBuilder`, `ConfigEntry`, and `ConfigMigrator`, with symmetrical `Typed*` aliases (`TypedConfig`, `TypedConfigBuilder`, `TypedConfigEntry`) to prevent naming collisions.
+- **Clean Public Surface & Aliases:** Streamlined exports to `Config`, `ConfigBuilder`, `ConfigEntry`, `ConfigMigrator`, and `ConfigMigrationContext`, with symmetrical `Typed*` aliases (`TypedConfig`, `TypedConfigBuilder`, `TypedConfigEntry`, `TypedConfigMigrationContext`, `TypedMigrationContext`) to prevent naming collisions.
+- **Modular Schema Migrations:** Extracted migration engine into dedicated module with transactional step execution, `ConfigMigrationException` diagnostics, automatic flattening of nested migrator mutations, and Drift-style `ConfigMigrationContext` utilities (`.rename()`, `.removePrefix()`, `.transform()`, `operator []`).
 - **Package Consolidation:** Restructured monorepo into a single, zero-dependency Dart package (Riverpod integration moved to a lightweight recipe in the README).
 
 

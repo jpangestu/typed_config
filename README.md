@@ -101,6 +101,32 @@ void main() {
 }
 ```
 
+### 5. Schema Migrations
+
+> **Rule of Thumb:**
+> * **Adding a new setting?** You do **not** need a migration or version bump. Absent keys automatically return their `defaultValue`.
+> * **Renaming, reshaping, or converting types?** Increment `schemaVersion` and supply sequential `ConfigMigrationContext` handlers ($v1 \rightarrow v2 \rightarrow v3$):
+
+```dart
+final config = await Config.initialize(
+  AppConfig.new,
+  configFile,
+  schemaVersion: 2,
+  migrations: {
+    2: (m) {
+      // 1. Move old key to a new prefix group
+      m.rename('theme', 'ui.themeMode');
+
+      // 2. Transform existing values or types (e.g. 0..100 to 0.0..1.0)
+      m.transform<num>('audio.volume', (v) => v / 100.0);
+
+      // 3. Purge a retired feature group or key
+      m.removePrefix('legacy_telemetry.');
+    },
+  },
+);
+```
+
 ---
 
 ## Integrations
@@ -109,7 +135,7 @@ Because typed_config is pure Dart, you can easily bridge it to Flutter or your f
 
 ### Riverpod Integration
 
-You can bridge typed_config into Riverpod with this lightweight extension, allowing widgets to watch individual entries without rebuilding on unrelated config changes::
+You can bridge typed_config into Riverpod with this lightweight extension, allowing widgets to watch individual entries without rebuilding on unrelated config changes:
 
 ```dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';

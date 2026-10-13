@@ -8,9 +8,7 @@ import 'package:path/path.dart' as p;
 
 import 'config_builder.dart';
 import 'config_entry.dart';
-
-/// Function signature for migrating raw configuration JSON maps between schema versions.
-typedef ConfigMigrator = void Function(Map<String, dynamic> raw);
+import 'config_migration.dart';
 
 const MapEquality<String, dynamic> _mapEquality = MapEquality<String, dynamic>();
 
@@ -350,6 +348,14 @@ class Config {
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) async {
+    if (schemaVersion < 1) {
+      throw ArgumentError.value(
+        schemaVersion,
+        'schemaVersion',
+        'Schema version must be at least 1.',
+      );
+    }
+
     final logger = onLog ?? (_kDebugMode ? (msg) => print('[Config] $msg') : null);
 
     if (!configFile.existsSync()) {
@@ -377,39 +383,18 @@ class Config {
       }
 
       final flatDecoded = flattenConfigMap(decoded);
-      final fileVersion = (flatDecoded[schemaVersionKey] as num?)?.toInt() ?? 1;
-      bool needsFlush = false;
-
-      if (fileVersion < schemaVersion) {
-        if (migrations != null) {
-          for (int v = fileVersion + 1; v <= schemaVersion; v++) {
-            final migrator = migrations[v];
-            if (migrator != null) {
-              try {
-                migrator(flatDecoded);
-              } catch (e, s) {
-                logger?.call('Migration to schema version v$v failed: $e');
-                onError?.call(e, s);
-                rethrow;
-              }
-            }
-          }
-        }
-        flatDecoded[schemaVersionKey] = schemaVersion;
-        needsFlush = true;
-      } else if (!flatDecoded.containsKey(schemaVersionKey)) {
-        flatDecoded[schemaVersionKey] = schemaVersion;
-        needsFlush = true;
-      } else if (fileVersion > schemaVersion) {
-        logger?.call(
-          'Config schema version ($fileVersion) is newer than current version ($schemaVersion).',
-        );
-      }
+      final migrationResult = migrateConfigData(
+        data: flatDecoded,
+        targetVersion: schemaVersion,
+        migrations: migrations,
+        onLog: logger,
+        onError: onError,
+      );
 
       final builder = ConfigBuilder.initialize(
         prefix: '',
         file: configFile,
-        cache: flatDecoded,
+        cache: migrationResult.data,
         onLog: onLog,
         onError: onError,
       );
@@ -417,9 +402,11 @@ class Config {
       instance.initFromBuilder(builder);
       builder.bind(instance);
 
-      if (needsFlush) {
+      if (migrationResult.didMigrate) {
         await instance.flush();
-        instance._log('Migrated config schema from v$fileVersion to v$schemaVersion.');
+        instance._log(
+          'Migrated config schema from v${migrationResult.fromVersion} to v${migrationResult.toVersion}.',
+        );
       }
       instance.startWatcher();
       return instance;
@@ -492,62 +479,4 @@ class Config {
 
   /// Returns the nested unflattened JSON map as it would appear on disk.
   Map<String, dynamic> toJson() => unflattenConfigMap(cache);
-}
-
-/// Recursively flattens a nested map into a flat map with dot-separated keys.
-Map<String, dynamic> flattenConfigMap(Map<String, dynamic> nested, [String prefix = '']) {
-  final result = <String, dynamic>{};
-  for (final entry in nested.entries) {
-    final fullKey = prefix.isEmpty ? entry.key : '$prefix.${entry.key}';
-    final val = entry.value;
-    if (val is Map<String, dynamic>) {
-      result.addAll(flattenConfigMap(val, fullKey));
-    } else if (val is Map) {
-      result.addAll(flattenConfigMap(Map<String, dynamic>.from(val), fullKey));
-    } else {
-      result[fullKey] = val;
-    }
-  }
-  return result;
-}
-
-/// Recursively un-flattens a flat map with dot-separated keys into a nested map structure.
-Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
-  final result = <String, dynamic>{};
-
-  // Pin schemaVersion to the very top of the generated JSON
-  if (flat.containsKey(Config.schemaVersionKey)) {
-    result[Config.schemaVersionKey] = flat[Config.schemaVersionKey];
-  }
-
-  for (final entry in flat.entries) {
-    if (entry.key == Config.schemaVersionKey) continue;
-    final key = entry.key;
-    final value = entry.value;
-
-    if (!key.contains('.')) {
-      result[key] = value;
-      continue;
-    }
-
-    final segments = key.split('.');
-    Map<String, dynamic> current = result;
-    for (int i = 0; i < segments.length - 1; i++) {
-      final seg = segments[i];
-      final existing = current[seg];
-      if (existing is Map<String, dynamic>) {
-        current = existing;
-      } else if (existing is Map) {
-        final converted = Map<String, dynamic>.from(existing);
-        current[seg] = converted;
-        current = converted;
-      } else {
-        final newMap = <String, dynamic>{};
-        current[seg] = newMap;
-        current = newMap;
-      }
-    }
-    current[segments.last] = value;
-  }
-  return result;
 }
