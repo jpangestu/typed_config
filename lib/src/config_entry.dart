@@ -1,68 +1,61 @@
-import 'config.dart';
-import 'config_builder.dart';
+import 'config_engine.dart';
 
-/// A strongly-typed configuration entry handle bound to a [Config] instance.
+/// A strongly-typed configuration entry handle bound to an active configuration engine.
 ///
 /// Provides synchronous reads via [value], immediate memory updates with
 /// debounced atomic disk persistence via [value]=, and selective change listening.
-final class ConfigEntry<T>({
+final class ConfigEntry<T> {
   /// Unique identifier used as the JSON map key (e.g. `'audio.volume'`).
-  required final String key,
+  final String key;
 
   /// Fallback value returned when the entry is absent or invalid in storage.
-  required final T defaultValue,
+  final T defaultValue;
 
-  /// Reference to the backing builder context.
-  ConfigBuilder? builder,
-
-  /// Direct reference to the backing [Config] engine.
-  Config? config,
+  /// Reference to the backing [ConfigEngine].
+  final ConfigEngine engine;
 
   /// Optional deserializer to convert raw JSON into [T].
-  final T Function(dynamic json)? fromJson,
+  final T Function(dynamic json)? fromJson;
 
   /// Optional serializer to convert [T] into a JSON-encodable object.
-  final dynamic Function(T value)? toJson,
-}) {
-  final ConfigBuilder? _builder = builder;
-  final Config? _explicitConfig = config;
+  final dynamic Function(T value)? toJson;
 
-  /// Reference to the backing [Config] engine.
-  Config get config {
-    final direct = _explicitConfig;
-    if (direct != null) return direct;
-    final b = _builder;
-    if (b != null) return b.config;
-    throw StateError('ConfigEntry is not bound to a Config or ConfigBuilder.');
-  }
+  ConfigEntry({
+    required this.key,
+    required this.defaultValue,
+    required this.engine,
+    this.fromJson,
+    this.toJson,
+  });
 
   /// Synchronously returns the typed value from memory.
   ///
   /// Falls back to [defaultValue] if the entry is not explicitly set in the cache.
   T get value {
-    if (!config.contains(this)) {
+    final raw = engine.readRaw(key);
+    if (raw == null && !engine.containsKey(key)) {
       return defaultValue;
     }
-    return parse(config.readRaw(key));
+    return parse(raw);
   }
 
   /// Updates this setting in memory immediately and schedules a debounced disk save.
   set value(T newValue) {
-    config.writeRaw(key, serialize(newValue));
+    engine.writeRaw(key, serialize(newValue));
   }
 
   /// Reverts this setting back to [defaultValue] and schedules a disk save.
   void reset() {
-    config.resetKey(key);
+    engine.resetKey(key);
   }
 
   /// Whether this entry has an explicitly stored value in memory.
-  bool get isModified => config.contains(this);
+  bool get isModified => engine.containsKey(key);
 
   /// Broadcast stream that emits the latest typed value whenever this entry changes.
   ///
   /// Ignores changes to unrelated entries.
-  Stream<T> get changes => config.watchKey(key).map((_) => value);
+  Stream<T> get changes => engine.watchKey(key).map((_) => value);
 
   /// Parses raw JSON into [T], safely falling back to [defaultValue].
   T parse(dynamic json) {
@@ -101,11 +94,6 @@ final class ConfigEntry<T>({
       try {
         return toJson!(val);
       } catch (_) {
-        if (toJson != null) {
-          try {
-            return toJson!(defaultValue);
-          } catch (_) {}
-        }
         return defaultValue;
       }
     }
@@ -114,8 +102,7 @@ final class ConfigEntry<T>({
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ConfigEntry<T> && runtimeType == other.runtimeType && key == other.key;
+      identical(this, other) || other is ConfigEntry<T> && key == other.key;
 
   @override
   int get hashCode => key.hashCode;

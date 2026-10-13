@@ -1,9 +1,4 @@
-import 'dart:async';
-import 'dart:io';
-
-import 'package:meta/meta.dart';
-
-import 'config.dart';
+import 'config_engine.dart';
 import 'config_entry.dart';
 
 /// A configuration construction context passed to class primary constructors.
@@ -11,83 +6,19 @@ import 'config_entry.dart';
 /// Used during application bootstrap to build strongly-typed [ConfigEntry] instances
 /// and organized domain-driven groups with automatic dot-separated key prefixing.
 final class ConfigBuilder {
+  /// Reference to the active configuration engine.
+  final ConfigEngine engine;
+
   /// The current namespace prefix (e.g. `'audio'` or empty string `''` for root).
   final String prefix;
 
-  final ConfigBuilder? _parent;
-  Config? _config;
-
-  @internal
-  final File? file;
-
-  @internal
-  final Map<String, dynamic> cache;
-
-  @internal
-  final StreamController<String> keyChanges;
-
-  @internal
-  final void Function(String message)? onLog;
-
-  @internal
-  final void Function(Object error, StackTrace stackTrace)? onError;
-
-  /// Creates a builder tied to an existing [Config] instance.
-  ConfigBuilder(this.prefix, Config config)
-    : _parent = null,
-      _config = config,
-      file = config.file,
-      cache = config.cache,
-      keyChanges = config.keyChanges,
-      onLog = config.onLog,
-      onError = config.onError;
-
-  /// Internal constructor used during initialization before [Config] is fully constructed.
-  @internal
-  ConfigBuilder.initialize({
-    required this.prefix,
-    ConfigBuilder? parent,
-    this.file,
-    Map<String, dynamic>? cache,
-    StreamController<String>? keyChanges,
-    this.onLog,
-    this.onError,
-  }) : _parent = parent,
-       cache = cache ?? parent?.cache ?? <String, dynamic>{},
-       keyChanges = keyChanges ?? parent?.keyChanges ?? StreamController<String>.broadcast();
-
-  /// Binds the constructed [Config] instance to this root builder.
-  @internal
-  void bind(Config config) {
-    _config = config;
-  }
-
-  /// The active [Config] instance for this builder.
-  @internal
-  Config get config {
-    final c = _config ?? _parent?.config;
-    if (c == null) {
-      throw StateError('ConfigBuilder has not been bound to a Config instance.');
-    }
-    return c;
-  }
+  /// Creates a builder tied to an active [ConfigEngine].
+  ConfigBuilder(this.engine, [this.prefix = '']);
 
   /// Creates a scoped child builder with an added namespace prefix (e.g. `withPrefix('audio')` -> `'audio'`).
   ConfigBuilder withPrefix(String name) {
     final childPrefix = prefix.isEmpty ? name : '$prefix.$name';
-    final child = ConfigBuilder.initialize(
-      prefix: childPrefix,
-      parent: this,
-      file: file,
-      cache: cache,
-      keyChanges: keyChanges,
-      onLog: onLog,
-      onError: onError,
-    );
-    if (_config != null) {
-      child.bind(_config!);
-    }
-    return child;
+    return ConfigBuilder(engine, childPrefix);
   }
 
   /// Defines a strongly-typed configuration entry.
@@ -101,7 +32,7 @@ final class ConfigBuilder {
     return ConfigEntry<T>(
       key: fullKey,
       defaultValue: defaultValue,
-      builder: this,
+      engine: engine,
       fromJson: fromJson,
       toJson: toJson,
     );
@@ -115,7 +46,7 @@ final class ConfigBuilder {
     return ConfigEntry<E>(
       key: fullKey,
       defaultValue: defaultValue,
-      builder: this,
+      engine: engine,
       fromJson: (j) {
         if (j is String) {
           if (values != null) {
@@ -137,7 +68,7 @@ final class ConfigBuilder {
     return ConfigEntry<List<T>>(
       key: fullKey,
       defaultValue: List<T>.unmodifiable(defaultValue),
-      builder: this,
+      engine: engine,
       fromJson: (json) {
         if (json is List) {
           try {

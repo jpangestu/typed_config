@@ -26,6 +26,15 @@ class MigrationConfig(ConfigBuilder builder) extends Config {
   final val = builder.define('val', 0);
 }
 
+class ConstructorReadConfig extends Config {
+  final ConfigEntry<String> title;
+  final String capturedTitle;
+
+  ConstructorReadConfig(ConfigBuilder builder)
+    : title = builder.define('title', 'default_title'),
+      capturedTitle = builder.define('title', 'default_title').value;
+}
+
 void main() {
   group('ConfigEntry Parsing & Serialization', () {
     late Config config;
@@ -79,10 +88,52 @@ void main() {
   });
 
   group('Config In-Memory Engine & Direct Handle Usage', () {
+    test('allows reading entry.value synchronously during constructor initialization', () {
+      final config = Config.inMemory(ConstructorReadConfig.new, {'title': 'custom_title'});
+      expect(config.capturedTitle, 'custom_title');
+      expect(config.title.value, 'custom_title');
+    });
+
     test('reads default values when cache is empty', () {
       final config = Config.inMemory(TestConfig.new);
       expect(config.audio.volume.value, 0.8);
       expect(config.audio.volume.isModified, isFalse);
+    });
+
+    test(
+      'does not trigger stream changes when re-assigning structurally identical collection',
+      () async {
+        final config = Config.inMemory(TestConfig.new, {
+          'tags': ['a', 'b'],
+        });
+        final events = <List<String>>[];
+        final sub = config.tags.changes.listen(events.add);
+        addTearDown(sub.cancel);
+
+        // Re-assign identical contents
+        config.tags.value = ['a', 'b'];
+        await Future<void>.delayed(Duration.zero);
+        expect(events, isEmpty);
+
+        // Mutate to new contents
+        config.tags.value = ['a', 'b', 'c'];
+        await Future<void>.delayed(Duration.zero);
+        expect(events, [
+          ['a', 'b', 'c'],
+        ]);
+      },
+    );
+
+    test('isDisposed flag tracks disposal and ignores post-disposal mutations', () {
+      final config = Config.inMemory(TestConfig.new);
+      expect(config.isDisposed, isFalse);
+
+      config.dispose();
+      expect(config.isDisposed, isTrue);
+
+      // Post-disposal write should be safely ignored without throwing
+      config.audio.volume.value = 0.99;
+      expect(config.audio.volume.value, 0.8);
     });
 
     test('updates values in memory immediately and notifies stream', () async {
