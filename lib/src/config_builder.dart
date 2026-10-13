@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import 'config_engine.dart';
 import 'config_entry.dart';
 
@@ -7,12 +9,14 @@ import 'config_entry.dart';
 /// and organized domain-driven groups with automatic dot-separated key prefixing.
 final class ConfigBuilder {
   /// Reference to the active configuration engine.
+  @internal
   final ConfigEngine engine;
 
   /// The current namespace prefix (e.g. `'audio'` or empty string `''` for root).
   final String prefix;
 
   /// Creates a builder tied to an active [ConfigEngine].
+  @internal
   ConfigBuilder(this.engine, [this.prefix = '']);
 
   /// Creates a scoped child builder with an added namespace prefix (e.g. `withPrefix('audio')` -> `'audio'`).
@@ -40,24 +44,19 @@ final class ConfigBuilder {
 
   /// Defines an enum configuration entry with automatic string serialization.
   ///
-  /// Optionally supply [values] to match against all enum cases.
-  ConfigEntry<E> defineEnum<E extends Enum>(String key, E defaultValue, {Iterable<E>? values}) {
+  /// Matches against [values] in O(1) time and falls back to [defaultValue] if invalid or absent.
+  ConfigEntry<E> defineEnum<E extends Enum>(
+    String key,
+    E defaultValue, {
+    required Iterable<E> values,
+  }) {
     final fullKey = prefix.isEmpty ? key : '$prefix.$key';
+    final lookup = {for (final v in values) v.name: v};
     return ConfigEntry<E>(
       key: fullKey,
       defaultValue: defaultValue,
       engine: engine,
-      fromJson: (j) {
-        if (j is String) {
-          if (values != null) {
-            for (final v in values) {
-              if (v.name == j) return v;
-            }
-          }
-          if (defaultValue.name == j) return defaultValue;
-        }
-        return defaultValue;
-      },
+      fromJson: (j) => j is String ? (lookup[j] ?? defaultValue) : defaultValue,
       toJson: (e) => e.name,
     );
   }

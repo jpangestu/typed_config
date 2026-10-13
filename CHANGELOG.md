@@ -1,15 +1,11 @@
 ## 0.2.0
 
-- **Consumer-First API:** Adopted Dart Primary Constructors and `ConfigBuilder` for domain-driven organization (`config.audio.volume.value`) and nested domain grouping (`builder.withPrefix('audio')`).
-- **Direct Entry Handles:** Direct synchronous `.value` access, `.value =` assignment, `.reset()`, and `.changes` stream on entries.
-- **Factory Bootstrapping:** Replaced static descriptor registry with constructor tear-off initialization (`Config.initialize(AppConfig.new, file)`).
-- **In-Memory Testing:** First-class support for in-memory testing without file I/O via `Config.inMemory(AppConfig.new)`.
-- **Zero-Boilerplate Enums & Lists:** Added `builder.define(...)`, `builder.defineEnum(...)`, and `builder.defineList(...)`.
-- **API Simplification:** Removed legacy `config.get()`, `config.set()`, `config.reset()`, and `config.watch()` methods in favor of direct handle operations.
-- **Clean Public Surface & Aliases:** Streamlined exports to `Config`, `ConfigBuilder`, `ConfigEntry`, `ConfigMigrator`, and `ConfigMigrationContext`, with symmetrical `Typed*` aliases (`TypedConfig`, `TypedConfigBuilder`, `TypedConfigEntry`, `TypedConfigMigrationContext`, `TypedMigrationContext`) to prevent naming collisions.
-- **Modular Schema Migrations:** Extracted migration engine into dedicated module with transactional step execution, `ConfigMigrationException` diagnostics, automatic flattening of nested migrator mutations, and Drift-style `ConfigMigrationContext` utilities (`.rename()`, `.removePrefix()`, `.transform()`, `operator []`).
-- **Package Consolidation:** Restructured monorepo into a single, zero-dependency Dart package (Riverpod integration moved to a lightweight recipe in the README).
-
+- **Redesigned API:** Define configs as classes using ConfigBuilder with direct entry handles (`entry.value`, `entry.changes`, `entry.reset()`) replacing legacy `config.get/set/watch` methods.
+- **Factory Bootstrapping:** Simplified startup via constructor tear-offs (`Config.initialize(AppConfig.new, file)`) and first-class in-memory testing (`Config.inMemory(AppConfig.new)`).
+- **Enums & Lists:** Added `builder.defineEnum(...)` and `builder.defineList(...)` with automatic serialization.
+- **Transactional Migrations:** Enhanced schema migrations with step-by-step transactional execution and `ConfigMigrationContext` utilities (`rename`, `transform`, `removePrefix`).
+- **Engine & I/O Optimizations:** Enabled synchronous reads during class constructor execution, deep collection equality to prevent redundant disk saves, and hardened atomic file persistence.
+- **Zero Dependencies:** Consolidated into a pure Dart package with zero framework coupling (Riverpod integration moved to a README recipe).
 
 ## 0.1.0
 

@@ -76,14 +76,8 @@ final class ConfigMigrationContext {
   /// If [value] is a nested [Map], it is automatically flattened into dot-separated keys.
   /// If [key] was already present, its previous value is replaced.
   void operator []=(String key, dynamic value) {
-    if (value is Map<String, dynamic>) {
-      for (final entry in flattenConfigMap(value, key).entries) {
-        data[entry.key] = entry.value;
-      }
-    } else if (value is Map) {
-      for (final entry in flattenConfigMap(Map<String, dynamic>.from(value), key).entries) {
-        data[entry.key] = entry.value;
-      }
+    if (value is Map) {
+      data.addAll(flattenConfigMap(value, key));
     } else {
       data[key] = value;
     }
@@ -122,20 +116,17 @@ ConfigMigrationResult migrateConfigData({
     );
   }
 
-  assert(() {
-    if (migrations != null) {
-      for (final v in migrations.keys) {
-        if (v <= 1) {
-          throw ArgumentError.value(
-            v,
-            'migrations',
-            'Migration registered for schema version v$v, but migrations start at v2.',
-          );
-        }
+  if (migrations != null) {
+    for (final v in migrations.keys) {
+      if (v <= 1) {
+        throw ArgumentError.value(
+          v,
+          'migrations',
+          'Migration registered for schema version v$v, but migrations start at v2.',
+        );
       }
     }
-    return true;
-  }());
+  }
 
   final fromVersion = parseSchemaVersion(data[schemaVersionKey]);
 
@@ -265,19 +256,23 @@ int parseSchemaVersion(dynamic value) {
 }
 
 /// Recursively flattens a nested map into a flat map with dot-separated keys.
-Map<String, dynamic> flattenConfigMap(Map<String, dynamic> nested, [String prefix = '']) {
+Map<String, dynamic> flattenConfigMap(Map<dynamic, dynamic> nested, [String prefix = '']) {
   final result = <String, dynamic>{};
-  for (final entry in nested.entries) {
-    final fullKey = prefix.isEmpty ? entry.key : '$prefix.${entry.key}';
-    final val = entry.value;
-    if (val is Map<String, dynamic>) {
-      result.addAll(flattenConfigMap(val, fullKey));
-    } else if (val is Map) {
-      result.addAll(flattenConfigMap(Map<String, dynamic>.from(val), fullKey));
-    } else {
-      result[fullKey] = val;
+
+  void flatten(Map<dynamic, dynamic> map, String p) {
+    for (final entry in map.entries) {
+      final key = entry.key.toString();
+      final fullKey = p.isEmpty ? key : '$p.$key';
+      final val = entry.value;
+      if (val is Map) {
+        flatten(val, fullKey);
+      } else {
+        result[fullKey] = val;
+      }
     }
   }
+
+  flatten(nested, prefix);
   return result;
 }
 
@@ -307,10 +302,6 @@ Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
       final existing = current[seg];
       if (existing is Map<String, dynamic>) {
         current = existing;
-      } else if (existing is Map) {
-        final converted = Map<String, dynamic>.from(existing);
-        current[seg] = converted;
-        current = converted;
       } else {
         final newMap = <String, dynamic>{};
         current[seg] = newMap;

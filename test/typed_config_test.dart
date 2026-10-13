@@ -6,24 +6,39 @@ import 'package:typed_config/typed_config.dart';
 
 enum ThemeMode { system, light, dark }
 
-class AudioSettings(ConfigBuilder builder) {
-  final volume = builder.define('volume', 0.8);
-  final muted = builder.define('muted', false);
+class AudioSettings {
+  final ConfigEntry<double> volume;
+  final ConfigEntry<bool> muted;
+
+  AudioSettings(ConfigBuilder builder)
+      : volume = builder.define('volume', 0.8),
+        muted = builder.define('muted', false);
 }
 
-class UiSettings(ConfigBuilder builder) {
-  final themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values);
-  final scale = builder.define('scale', 1.0);
+class UiSettings {
+  final ConfigEntry<ThemeMode> themeMode;
+  final ConfigEntry<double> scale;
+
+  UiSettings(ConfigBuilder builder)
+      : themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values),
+        scale = builder.define('scale', 1.0);
 }
 
-class TestConfig(ConfigBuilder builder) extends Config {
-  final audio = AudioSettings(builder.withPrefix('audio'));
-  final ui = UiSettings(builder.withPrefix('ui'));
-  final tags = builder.defineList('tags', ['default']);
+class TestConfig extends Config {
+  final AudioSettings audio;
+  final UiSettings ui;
+  final ConfigEntry<List<String>> tags;
+
+  TestConfig(ConfigBuilder builder)
+      : audio = AudioSettings(builder.withPrefix('audio')),
+        ui = UiSettings(builder.withPrefix('ui')),
+        tags = builder.defineList('tags', ['default']);
 }
 
-class MigrationConfig(ConfigBuilder builder) extends Config {
-  final val = builder.define('val', 0);
+class MigrationConfig extends Config {
+  final ConfigEntry<int> val;
+
+  MigrationConfig(ConfigBuilder builder) : val = builder.define('val', 0);
 }
 
 class ConstructorReadConfig extends Config {
@@ -31,8 +46,8 @@ class ConstructorReadConfig extends Config {
   final String capturedTitle;
 
   ConstructorReadConfig(ConfigBuilder builder)
-    : title = builder.define('title', 'default_title'),
-      capturedTitle = builder.define('title', 'default_title').value;
+      : title = builder.define('title', 'default_title'),
+        capturedTitle = builder.define('title', 'default_title').value;
 }
 
 void main() {
@@ -215,13 +230,17 @@ void main() {
       expect(config.ui.scale.value, 1.0);
     });
 
-    test('serializes enums cleanly with entryEnum', () {
-      final config = Config.inMemory(TestConfig.new);
-      expect(config.ui.themeMode.value, ThemeMode.system);
-
-      config.ui.themeMode.value = ThemeMode.dark;
+    test('serializes enums cleanly and deserializes non-default values in O(1)', () {
+      final config = Config.inMemory(TestConfig.new, {'ui.themeMode': 'dark'});
       expect(config.ui.themeMode.value, ThemeMode.dark);
-      expect(config.cache['ui.themeMode'], 'dark');
+
+      config.ui.themeMode.value = ThemeMode.light;
+      expect(config.ui.themeMode.value, ThemeMode.light);
+      expect(config.cache['ui.themeMode'], 'light');
+
+      // Invalid value falls back to default
+      config.cache['ui.themeMode'] = 'invalid_theme';
+      expect(config.ui.themeMode.value, ThemeMode.system);
     });
   });
 
@@ -449,20 +468,4 @@ void main() {
       expect(config.audio.volume.value, 0.15);
     });
   });
-
-  group('Typed* Aliases Symmetrical Compatibility', () {
-    test('works with TypedConfig, TypedConfigBuilder, and TypedConfigEntry', () {
-      final config = TypedConfig.inMemory((TypedConfigBuilder builder) {
-        return _AliasedConfig(builder);
-      });
-
-      expect(config.setting.value, 'hello');
-      config.setting.value = 'world';
-      expect(config.setting.value, 'world');
-    });
-  });
-}
-
-class _AliasedConfig(TypedConfigBuilder builder) extends TypedConfig {
-  final TypedConfigEntry<String> setting = builder.define('setting', 'hello');
 }

@@ -1,9 +1,11 @@
+import 'package:meta/meta.dart';
+
 import 'config_engine.dart';
 
-/// A strongly-typed configuration entry handle bound to an active configuration engine.
+/// A strongly-typed configuration entry handle.
 ///
-/// Provides synchronous reads via [value], immediate memory updates with
-/// debounced atomic disk persistence via [value]=, and selective change listening.
+/// Provides synchronous reads via [value], immediate in-memory updates with
+/// debounced atomic disk persistence via [value]=, and selective change listening via [changes].
 final class ConfigEntry<T> {
   /// Unique identifier used as the JSON map key (e.g. `'audio.volume'`).
   final String key;
@@ -12,6 +14,7 @@ final class ConfigEntry<T> {
   final T defaultValue;
 
   /// Reference to the backing [ConfigEngine].
+  @internal
   final ConfigEngine engine;
 
   /// Optional deserializer to convert raw JSON into [T].
@@ -20,6 +23,7 @@ final class ConfigEntry<T> {
   /// Optional serializer to convert [T] into a JSON-encodable object.
   final dynamic Function(T value)? toJson;
 
+  @internal
   ConfigEntry({
     required this.key,
     required this.defaultValue,
@@ -74,15 +78,6 @@ final class ConfigEntry<T> {
     // Handle JSON num-to-int coercion
     if (defaultValue is int && json is num) {
       return json.toInt() as T;
-    }
-    // Handle JSON dynamic lists for List<String> entries
-    if (defaultValue is List<String> && json is List) {
-      try {
-        final list = json.whereType<String>().toList();
-        return List<String>.unmodifiable(list) as T;
-      } catch (_) {
-        return defaultValue;
-      }
     }
     if (json is T) return json;
     return defaultValue;

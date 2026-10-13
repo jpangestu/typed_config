@@ -1,6 +1,5 @@
 import 'package:test/test.dart';
 import 'package:typed_config/src/config_migration.dart';
-import 'package:typed_config/typed_config.dart';
 
 void main() {
   group('parseSchemaVersion', () {
@@ -266,30 +265,6 @@ void main() {
       expect(m['ui.font.size'], 14);
       expect(m.containsKey('ui'), isFalse);
       expect(m.containsKey('ui.font'), isFalse);
-    });
-  });
-
-  group('Symmetric TypedConfigMigration Aliases', () {
-    test('TypedConfigMigrationException is assignable to ConfigMigrationException', () {
-      final ex = TypedConfigMigrationException(
-        fromVersion: 1,
-        toVersion: 2,
-        failedAtVersion: 2,
-        cause: Exception('fail'),
-        stackTrace: StackTrace.empty,
-      );
-      expect(ex, isA<ConfigMigrationException>());
-      expect(ex.toString(), contains('Migration to schema version v2 failed'));
-    });
-
-    test('TypedMigrationContext and TypedConfigMigrationContext are assignable to ConfigMigrationContext', () {
-      final m = TypedMigrationContext({'key': 'val'});
-      expect(m, isA<ConfigMigrationContext>());
-      expect(m['key'], 'val');
-
-      final m2 = TypedConfigMigrationContext({'key': 'val2'});
-      expect(m2, isA<ConfigMigrationContext>());
-      expect(m2['key'], 'val2');
     });
   });
 }

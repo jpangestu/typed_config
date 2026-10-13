@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:meta/meta.dart';
@@ -9,10 +8,21 @@ import 'config_engine.dart';
 import 'config_entry.dart';
 import 'config_migration.dart';
 
-/// Central application configuration engine managing in-memory cache,
-/// debounced atomic disk writes, and cross-platform file synchronization.
+/// Base class for strongly-typed application configurations.
 ///
-/// Subclass this or instantiate directly to define application settings.
+/// Subclass [Config] using a primary constructor that accepts [ConfigBuilder] to
+/// declare your application settings:
+///
+/// ```dart
+/// class AppConfig(ConfigBuilder builder) extends Config {
+///   final theme = builder.define('theme', 'system');
+///   final volume = builder.define('volume', 0.8);
+/// }
+/// ```
+///
+/// Load once asynchronously at startup using [Config.initialize] (or [Config.inMemory]
+/// for tests). Once initialized, all entries provide synchronous reads, immediate
+/// in-memory writes, and debounced disk persistence.
 class Config {
   /// Key used in JSON storage to track the current configuration schema version.
   static const String schemaVersionKey = 'schemaVersion';
@@ -64,7 +74,7 @@ class Config {
   }
 
   // ==============================================================================================
-  // Core Engine Operations
+  // Direct Key Access & Overrides
   // ==============================================================================================
 
   /// Whether [entry] has an explicitly stored value in the cache.
@@ -116,66 +126,17 @@ class Config {
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) async {
-    if (schemaVersion < 1) {
-      throw ArgumentError.value(
-        schemaVersion,
-        'schemaVersion',
-        'Schema version must be at least 1.',
-      );
-    }
-
-    final logger =
-        onLog ??
-        (!bool.fromEnvironment('dart.vm.product') ? (msg) => print('[Config] $msg') : null);
-
-    Map<String, dynamic> cache;
-    bool shouldFlushImmediately = false;
-
-    if (!configFile.existsSync()) {
-      cache = <String, dynamic>{schemaVersionKey: schemaVersion};
-      shouldFlushImmediately = true;
-    } else {
-      try {
-        final content = await configFile.readAsString();
-        final decoded = jsonDecode(content);
-        if (decoded is! Map<String, dynamic>) {
-          throw const FormatException('Config JSON is not an object');
-        }
-
-        final flatDecoded = flattenConfigMap(decoded);
-        final migrationResult = migrateConfigData(
-          data: flatDecoded,
-          targetVersion: schemaVersion,
-          migrations: migrations,
-          onLog: logger,
-          onError: onError,
-        );
-
-        cache = migrationResult.data;
-        if (migrationResult.didMigrate) {
-          shouldFlushImmediately = true;
-          logger?.call(
-            'Migrated config schema from v${migrationResult.fromVersion} to v${migrationResult.toVersion}.',
-          );
-        }
-      } catch (e, s) {
-        await ConfigEngine.quarantineFile(configFile, logger);
-        cache = <String, dynamic>{schemaVersionKey: schemaVersion};
-        shouldFlushImmediately = true;
-        if (onError != null) {
-          onError(e, s);
-        } else {
-          print('[Config ERROR] Failed to load existing config. Resetting to defaults.: $e');
-        }
-      }
-    }
-
-    final engine = ConfigEngine(file: configFile, cache: cache, onLog: onLog, onError: onError);
+    final engine = await ConfigEngine.load(
+      configFile,
+      schemaVersion: schemaVersion,
+      migrations: migrations,
+      onLog: onLog,
+      onError: onError,
+    );
     final builder = ConfigBuilder(engine);
-    final instance = factory(builder);
-    instance.attachEngine(engine);
+    final instance = factory(builder)..attachEngine(engine);
 
-    if (shouldFlushImmediately) {
+    if (engine.isDirty) {
       await instance.flush();
     }
     instance.startWatcher();
@@ -187,13 +148,9 @@ class Config {
     T Function(ConfigBuilder builder) factory, [
     Map<String, dynamic>? initialCache,
   ]) {
-    final engine = ConfigEngine(
-      cache: initialCache != null ? flattenConfigMap(initialCache) : <String, dynamic>{},
-    );
+    final engine = ConfigEngine.inMemory(initialCache);
     final builder = ConfigBuilder(engine);
-    final instance = factory(builder);
-    instance.attachEngine(engine);
-    return instance;
+    return factory(builder)..attachEngine(engine);
   }
 
   /// Releases active timers, file watchers, and streams.

@@ -17,6 +17,9 @@ Manage and persist application configs (or settings, or preferences, or whatever
 
 Organize config into domain-driven groups (`ConfigBuilder`), then mount them on your root `Config`:
 
+#### Recommended: Primary Constructors (Dart 3.13+)
+Cleanest syntax with automatic type inference and zero boilerplate:
+
 ```dart
 enum ThemeMode { system, light, dark }
 
@@ -36,6 +39,36 @@ class UiSettings(ConfigBuilder builder) {
   final fontScale = builder.define('fontScale', 1.0);
 }
 ```
+
+<details>
+<summary><b>Traditional Constructor Syntax (Dart 3.0+)</b></summary>
+
+If your project targets an earlier Dart SDK, use standard constructor initializer lists:
+
+```dart
+class AppConfig extends Config {
+  final ConfigEntry<String> language;
+  final ConfigEntry<bool> autoCheckUpdates;
+  final UiSettings ui;
+
+  AppConfig(ConfigBuilder builder)
+    : language = builder.define('language', 'en'),
+      autoCheckUpdates = builder.define('autoCheckUpdates', true),
+      ui = UiSettings(builder.withPrefix('ui'));
+}
+
+class UiSettings {
+  final ConfigEntry<ThemeMode> themeMode;
+  final ConfigEntry<bool> compactMode;
+  final ConfigEntry<double> fontScale;
+
+  UiSettings(ConfigBuilder builder)
+    : themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values),
+      compactMode = builder.define('compactMode', false),
+      fontScale = builder.define('fontScale', 1.0);
+}
+```
+</details>
 
 > **Tip:** `builder.withPrefix('ui')` automatically prefixes child keys as `'ui.themeMode'`, formatting into indented nested objects on disk.
 
@@ -114,13 +147,13 @@ final config = await Config.initialize(
   schemaVersion: 2,
   migrations: {
     2: (m) {
-      // 1. Move old key to a new prefix group
+      // Move old key to a new prefix group
       m.rename('theme', 'ui.themeMode');
 
-      // 2. Transform existing values or types (e.g. 0..100 to 0.0..1.0)
+      // Transform existing values or types (e.g. 0..100 to 0.0..1.0)
       m.transform<num>('audio.volume', (v) => v / 100.0);
 
-      // 3. Purge a retired feature group or key
+      // Purge a retired feature group or key
       m.removePrefix('legacy_telemetry.');
     },
   },
@@ -144,13 +177,15 @@ import 'package:typed_config/typed_config.dart';
 final _entryProviderCache = Expando<NotifierProvider<ConfigEntryNotifier<dynamic>, dynamic>>();
 
 /// A Riverpod [Notifier] that synchronizes a single [ConfigEntry].
-class ConfigEntryNotifier<T>(final ConfigEntry<T> _entry) extends Notifier<T> {
+class ConfigEntryNotifier<T> extends Notifier<T> {
+  final ConfigEntry<T> _entry;
+
+  ConfigEntryNotifier(this._entry);
+
   @override
   T build() {
     final sub = _entry.changes.listen((newValue) {
-      if (state != newValue) {
-        state = newValue;
-      }
+      state = newValue;
     });
     ref.onDispose(sub.cancel);
     return _entry.value;
@@ -205,6 +240,5 @@ class ThemeSelector extends ConsumerWidget {
 
 ## Additional information
 
-- **Name Collision Tip:** If your codebase already defines a `Config` class, `typed_config` provides symmetrical aliases: `TypedConfig`, `TypedConfigBuilder`, and `TypedConfigEntry`.
 - **Issues & Feedback:** File bug reports and feature requests on [GitHub Issues](https://github.com/jpangestu/typed_config/issues).
 - **Contributing:** Pull requests are welcome! Please ensure all tests pass by running `dart test`.

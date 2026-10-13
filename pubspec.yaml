@@ -5,7 +5,7 @@ repository: https://github.com/jpangestu/typed_config
 issue_tracker: https://github.com/jpangestu/typed_config/issues
 
 environment:
-  sdk: ^3.13.4
+  sdk: ^3.0.0
 
 dependencies:
   collection: ^1.19.1

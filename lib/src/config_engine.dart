@@ -29,6 +29,7 @@ final class ConfigEngine {
   StreamSubscription<FileSystemEvent>? _fileWatcherSubscription;
   int _writeNonce = 0;
   bool _isDisposed = false;
+  bool isDirty = false;
 
   bool get isDisposed => _isDisposed;
 
@@ -36,10 +37,11 @@ final class ConfigEngine {
     this.file,
     Map<String, dynamic>? cache,
     StreamController<String>? keyChanges,
+    this.isDirty = false,
     this.onLog,
     this.onError,
-  }) : cache = cache ?? <String, dynamic>{},
-       keyChanges = keyChanges ?? StreamController<String>.broadcast();
+  })  : cache = cache ?? <String, dynamic>{},
+        keyChanges = keyChanges ?? StreamController<String>.broadcast();
 
   void log(String message) {
     if (onLog != null) {
@@ -148,6 +150,7 @@ final class ConfigEngine {
           } catch (_) {}
         }
 
+        isDirty = false;
         log('Successfully written to disk.');
         completer.complete();
       } catch (e, s) {
@@ -223,6 +226,83 @@ final class ConfigEngine {
     } catch (e, s) {
       logError('Failed to reload config from disk', e, s);
     }
+  }
+
+  /// Asynchronously loads a [ConfigEngine] from disk, running schema migrations or quarantining corrupt files.
+  static Future<ConfigEngine> load(
+    File configFile, {
+    int schemaVersion = 1,
+    Map<int, ConfigMigrator>? migrations,
+    void Function(String message)? onLog,
+    void Function(Object error, StackTrace stackTrace)? onError,
+  }) async {
+    if (schemaVersion < 1) {
+      throw ArgumentError.value(
+        schemaVersion,
+        'schemaVersion',
+        'Schema version must be at least 1.',
+      );
+    }
+
+    final logger = onLog ??
+        (!bool.fromEnvironment('dart.vm.product') ? (msg) => print('[Config] $msg') : null);
+
+    Map<String, dynamic> cache;
+    bool isDirty = false;
+
+    if (!configFile.existsSync()) {
+      cache = <String, dynamic>{schemaVersionKey: schemaVersion};
+      isDirty = true;
+    } else {
+      try {
+        final content = await configFile.readAsString();
+        final decoded = jsonDecode(content);
+        if (decoded is! Map<String, dynamic>) {
+          throw const FormatException('Config JSON is not an object');
+        }
+
+        final flatDecoded = flattenConfigMap(decoded);
+        final migrationResult = migrateConfigData(
+          data: flatDecoded,
+          targetVersion: schemaVersion,
+          migrations: migrations,
+          onLog: logger,
+          onError: onError,
+        );
+
+        cache = migrationResult.data;
+        if (migrationResult.didMigrate) {
+          isDirty = true;
+          logger?.call(
+            'Migrated config schema from v${migrationResult.fromVersion} to v${migrationResult.toVersion}.',
+          );
+        }
+      } catch (e, s) {
+        await quarantineFile(configFile, logger);
+        cache = <String, dynamic>{schemaVersionKey: schemaVersion};
+        isDirty = true;
+        if (onError != null) {
+          onError(e, s);
+        } else {
+          print('[Config ERROR] Failed to load existing config. Resetting to defaults.: $e');
+        }
+      }
+    }
+
+    return ConfigEngine(
+      file: configFile,
+      cache: cache,
+      isDirty: isDirty,
+      onLog: onLog,
+      onError: onError,
+    );
+  }
+
+  /// Instantiates an in-memory [ConfigEngine] without file persistence.
+  static ConfigEngine inMemory([Map<String, dynamic>? initialCache]) {
+    return ConfigEngine(
+      cache: initialCache != null ? flattenConfigMap(initialCache) : <String, dynamic>{},
+    );
   }
 
   static Future<void> quarantineFile(File file, void Function(String message)? log) async {
