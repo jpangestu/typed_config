@@ -6,7 +6,8 @@ import 'package:meta/meta.dart';
 import 'config_builder.dart';
 import 'config_engine.dart';
 import 'config_entry.dart';
-import 'config_migration.dart';
+import 'config_migration.dart' as migration;
+import 'config_migration.dart' show ConfigMigrator;
 
 /// Base class for strongly-typed application configurations.
 ///
@@ -14,7 +15,7 @@ import 'config_migration.dart';
 /// declare your application settings:
 ///
 /// ```dart
-/// class AppConfig(ConfigBuilder builder) extends Config {
+/// class AppConfig(ConfigBuilder builder) extends Config(builder) {
 ///   final theme = builder.define('theme', 'system');
 ///   final volume = builder.define('volume', 0.8);
 /// }
@@ -25,7 +26,7 @@ import 'config_migration.dart';
 /// in-memory writes, and debounced disk persistence.
 class Config {
   /// Key used in JSON storage to track the current configuration schema version.
-  static const String schemaVersionKey = 'schemaVersion';
+  static const String schemaVersionKey = migration.schemaVersionKey;
 
   ConfigEngine? _engine;
 

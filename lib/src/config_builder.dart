@@ -2,6 +2,7 @@ import 'package:meta/meta.dart';
 
 import 'config_engine.dart';
 import 'config_entry.dart';
+import 'config_migration.dart';
 
 /// A configuration construction context passed to class primary constructors.
 ///
@@ -19,9 +20,43 @@ final class ConfigBuilder {
   @internal
   ConfigBuilder(this.engine, [this.prefix = '']);
 
+  static void _validateSegment(String segment, String paramName) {
+    if (segment.isEmpty ||
+        segment.startsWith('.') ||
+        segment.endsWith('.') ||
+        segment.contains('..')) {
+      throw ArgumentError.value(
+        segment,
+        paramName,
+        'Key segment must be non-empty and cannot start/end with "." or contain "..".',
+      );
+    }
+  }
+
+  String _resolveKey(String key) {
+    _validateSegment(key, 'key');
+    final fullKey = prefix.isEmpty ? key : '$prefix.$key';
+    if (fullKey == schemaVersionKey || fullKey.startsWith('$schemaVersionKey.')) {
+      throw ArgumentError.value(
+        fullKey,
+        'key',
+        '"$schemaVersionKey" is reserved for internal schema tracking.',
+      );
+    }
+    return fullKey;
+  }
+
   /// Creates a scoped child builder with an added namespace prefix (e.g. `withPrefix('audio')` -> `'audio'`).
   ConfigBuilder withPrefix(String name) {
+    _validateSegment(name, 'name');
     final childPrefix = prefix.isEmpty ? name : '$prefix.$name';
+    if (childPrefix == schemaVersionKey || childPrefix.startsWith('$schemaVersionKey.')) {
+      throw ArgumentError.value(
+        childPrefix,
+        'name',
+        '"$schemaVersionKey" is reserved for internal schema tracking.',
+      );
+    }
     return ConfigBuilder(engine, childPrefix);
   }
 
@@ -32,7 +67,7 @@ final class ConfigBuilder {
     T Function(dynamic json)? fromJson,
     dynamic Function(T value)? toJson,
   }) {
-    final fullKey = prefix.isEmpty ? key : '$prefix.$key';
+    final fullKey = _resolveKey(key);
     return ConfigEntry<T>(
       key: fullKey,
       defaultValue: defaultValue,
@@ -50,7 +85,7 @@ final class ConfigBuilder {
     E defaultValue, {
     required Iterable<E> values,
   }) {
-    final fullKey = prefix.isEmpty ? key : '$prefix.$key';
+    final fullKey = _resolveKey(key);
     final lookup = {for (final v in values) v.name: v};
     return ConfigEntry<E>(
       key: fullKey,
@@ -63,21 +98,31 @@ final class ConfigBuilder {
 
   /// Defines a list configuration entry, defensively wrapped in unmodifiable views.
   ConfigEntry<List<T>> defineList<T>(String key, List<T> defaultValue) {
-    final fullKey = prefix.isEmpty ? key : '$prefix.$key';
+    final fullKey = _resolveKey(key);
+    final unmodifiableDefault = List<T>.unmodifiable(defaultValue);
     return ConfigEntry<List<T>>(
       key: fullKey,
-      defaultValue: List<T>.unmodifiable(defaultValue),
+      defaultValue: unmodifiableDefault,
       engine: engine,
       fromJson: (json) {
         if (json is List) {
           try {
-            final list = json.whereType<T>().toList();
-            return List<T>.unmodifiable(list);
+            if (T == double) {
+              return List<T>.unmodifiable(
+                json.whereType<num>().map((e) => e.toDouble() as T),
+              );
+            }
+            if (T == int) {
+              return List<T>.unmodifiable(
+                json.whereType<num>().map((e) => e.toInt() as T),
+              );
+            }
+            return List<T>.unmodifiable(json.whereType<T>());
           } catch (_) {
-            return defaultValue;
+            return unmodifiableDefault;
           }
         }
-        return defaultValue;
+        return unmodifiableDefault;
       },
       toJson: (val) => val,
     );

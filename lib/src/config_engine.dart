@@ -8,7 +8,10 @@ import 'package:path/path.dart' as p;
 
 import 'config_migration.dart';
 
-const MapEquality<String, dynamic> _mapEquality = MapEquality<String, dynamic>();
+const DeepCollectionEquality _deepEquality = DeepCollectionEquality();
+const MapEquality<String, dynamic> _mapEquality = MapEquality<String, dynamic>(
+  values: _deepEquality,
+);
 
 /// Internal execution engine managing configuration cache, disk persistence,
 /// debounce timers, file watchers, and change broadcasting.
@@ -17,6 +20,8 @@ final class ConfigEngine {
   static const bool _kDebugMode = !bool.fromEnvironment('dart.vm.product');
 
   final File? file;
+  final int schemaVersion;
+  final Map<int, ConfigMigrator>? migrations;
   final Map<String, dynamic> cache;
   final StreamController<String> keyChanges;
   final void Function(String message)? onLog;
@@ -27,7 +32,9 @@ final class ConfigEngine {
   Completer<void>? _currentWrite;
   Completer<void>? _nextWrite;
   StreamSubscription<FileSystemEvent>? _fileWatcherSubscription;
+  DateTime? _ignoreWatcherUntil;
   int _writeNonce = 0;
+  int _changeVersion = 0;
   bool _isDisposed = false;
   bool isDirty = false;
 
@@ -35,6 +42,8 @@ final class ConfigEngine {
 
   ConfigEngine({
     this.file,
+    this.schemaVersion = 1,
+    this.migrations,
     Map<String, dynamic>? cache,
     StreamController<String>? keyChanges,
     this.isDirty = false,
@@ -65,52 +74,138 @@ final class ConfigEngine {
     }
   }
 
-  bool containsKey(String key) => cache.containsKey(key);
+  void _removeAncestors(String key) {
+    int dotIndex = key.indexOf('.');
+    while (dotIndex != -1) {
+      cache.remove(key.substring(0, dotIndex));
+      dotIndex = key.indexOf('.', dotIndex + 1);
+    }
+  }
 
-  dynamic readRaw(String key) => cache[key];
+  bool containsKey(String key) {
+    if (cache.containsKey(key)) return true;
+    final prefix = '$key.';
+    return cache.keys.any((k) => k.startsWith(prefix));
+  }
+
+  dynamic readRaw(String key) {
+    // Fast O(1) path for all primitives, enums, lists, and empty maps
+    if (cache.containsKey(key)) return cache[key];
+
+    // Reconstruct nested map if 'key.*' entries exist
+    final prefix = '$key.';
+    Map<String, dynamic>? subFlat;
+    for (final entry in cache.entries) {
+      if (entry.key.startsWith(prefix)) {
+        (subFlat ??= <String, dynamic>{})[entry.key.substring(prefix.length)] = entry.value;
+      }
+    }
+    if (subFlat != null) {
+      return unflattenConfigMap(subFlat);
+    }
+    return null;
+  }
 
   void writeRaw(String key, dynamic value) {
     if (_isDisposed) return;
 
-    dynamic serialized = value;
-    if (serialized is List) {
-      serialized = List<dynamic>.unmodifiable(serialized);
-    } else if (serialized is Map) {
-      serialized = Map<String, dynamic>.unmodifiable(serialized);
-    }
+    final prefix = '$key.';
 
-    if (cache.containsKey(key) && const DeepCollectionEquality().equals(cache[key], serialized)) {
+    if (value is Map) {
+      final incomingFlat = value.isEmpty
+          ? <String, dynamic>{key: const <String, dynamic>{}}
+          : flattenConfigMap(value, key);
+
+      // Check if the current state for this key/prefix already matches incomingFlat
+      final currentFlat = <String, dynamic>{
+        if (cache.containsKey(key)) key: cache[key],
+        for (final e in cache.entries)
+          if (e.key.startsWith(prefix)) e.key: e.value,
+      };
+
+      if (_mapEquality.equals(currentFlat, incomingFlat)) return;
+
+      _removeAncestors(key);
+      cache.remove(key);
+      cache.removeWhere((k, _) => k.startsWith(prefix));
+      cache.addAll(incomingFlat);
+
+      _changeVersion++;
+      isDirty = true;
+      _notifyKey(key);
+      _scheduleSave();
       return;
     }
 
+    dynamic serialized = value;
+    if (serialized is List) {
+      serialized = List<dynamic>.unmodifiable(serialized);
+    }
+
+    if (cache.containsKey(key) && _deepEquality.equals(cache[key], serialized)) {
+      return;
+    }
+
+    _removeAncestors(key);
+    cache.removeWhere((k, _) => k.startsWith(prefix));
     cache[key] = serialized;
+    _changeVersion++;
+    isDirty = true;
     _notifyKey(key);
     _scheduleSave();
   }
 
   void resetKey(String key) {
-    if (_isDisposed || !cache.containsKey(key)) return;
-    cache.remove(key);
+    if (_isDisposed) return;
+    final prefix = '$key.';
+    bool removed = cache.remove(key) != null;
+    cache.removeWhere((k, _) {
+      if (k.startsWith(prefix)) {
+        removed = true;
+        return true;
+      }
+      return false;
+    });
+    if (!removed) return;
+
+    _changeVersion++;
+    isDirty = true;
     _notifyKey(key);
     _scheduleSave();
   }
 
   Future<void> resetAll() async {
     if (_isDisposed) return;
+    final keepVersion = file != null || cache.containsKey(schemaVersionKey);
     cache.clear();
+    if (keepVersion) {
+      cache[schemaVersionKey] = schemaVersion;
+    }
+    _changeVersion++;
+    isDirty = true;
     _notifyKey('*');
     _scheduleSave();
     await flush();
   }
 
   Stream<String> watchKey(String key) {
-    return keyChanges.stream.where((changedKey) => changedKey == key || changedKey == '*');
+    final prefix = '$key.';
+    return keyChanges.stream.where(
+      (changedKey) =>
+          changedKey == key ||
+          changedKey == '*' ||
+          changedKey.startsWith(prefix) ||
+          key.startsWith('$changedKey.'),
+    );
   }
 
   void _scheduleSave() {
     if (file == null || _isDisposed) return;
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 300), () => unawaited(flush()));
+    _debounceTimer = Timer(
+      const Duration(milliseconds: 300),
+      () => unawaited(flush()),
+    );
   }
 
   Future<void> flush() {
@@ -128,17 +223,30 @@ final class ConfigEngine {
     _currentWrite = completer;
 
     () async {
+      final writeVersion = _changeVersion;
       try {
         final flatMap = Map<String, dynamic>.from(cache);
         final nestedMap = unflattenConfigMap(flatMap);
-        final jsonString = JsonEncoder.withIndent('  ', (o) => o.toString()).convert(nestedMap);
+        final jsonString = JsonEncoder.withIndent(
+          '  ',
+          (o) => o.toString(),
+        ).convert(nestedMap);
 
         if (!targetFile.parent.existsSync()) {
           targetFile.parent.createSync(recursive: true);
         }
 
         final tempFile = File('${targetFile.path}.${pid}_${_writeNonce++}.tmp');
+        _ignoreWatcherUntil = DateTime.now().add(const Duration(seconds: 2));
         await tempFile.writeAsString(jsonString, flush: true);
+
+        if (_isDisposed) {
+          try {
+            await tempFile.delete();
+          } catch (_) {}
+          completer.complete();
+          return;
+        }
 
         try {
           await tempFile.rename(targetFile.path);
@@ -150,7 +258,12 @@ final class ConfigEngine {
           } catch (_) {}
         }
 
-        isDirty = false;
+        _ignoreWatcherUntil = DateTime.now().add(
+          const Duration(milliseconds: 250),
+        );
+        if (_changeVersion == writeVersion) {
+          isDirty = false;
+        }
         log('Successfully written to disk.');
         completer.complete();
       } catch (e, s) {
@@ -169,19 +282,36 @@ final class ConfigEngine {
     return completer.future;
   }
 
+  bool get _shouldIgnoreWatcherEvent {
+    if (_isDisposed || _currentWrite != null || isDirty) return true;
+    if (_debounceTimer?.isActive ?? false) return true;
+    final ignoreUntil = _ignoreWatcherUntil;
+    if (ignoreUntil != null && DateTime.now().isBefore(ignoreUntil)) {
+      return true;
+    }
+    return false;
+  }
+
   void startWatcher() {
     final targetFile = file;
     if (targetFile == null || _isDisposed) return;
     if (!FileSystemEntity.isWatchSupported) return;
 
+    _fileWatcherSubscription?.cancel();
+
     try {
       _fileWatcherSubscription = targetFile.parent.watch().listen((event) {
         if (p.basename(event.path) == p.basename(targetFile.path) &&
             event.type != FileSystemEvent.delete) {
+          if (_shouldIgnoreWatcherEvent) return;
           _watcherDebounceTimer?.cancel();
-          _watcherDebounceTimer = Timer(const Duration(milliseconds: 150), () async {
-            await reloadFromDisk();
-          });
+          _watcherDebounceTimer = Timer(
+            const Duration(milliseconds: 150),
+            () async {
+              if (_shouldIgnoreWatcherEvent) return;
+              await reloadFromDisk();
+            },
+          );
         }
       });
     } catch (e) {
@@ -201,23 +331,45 @@ final class ConfigEngine {
       }
 
       final flatDecoded = flattenConfigMap(decoded);
-      if (_mapEquality.equals(cache, flatDecoded)) return;
+      final migrationResult = migrateConfigData(
+        data: flatDecoded,
+        targetVersion: schemaVersion,
+        migrations: migrations,
+        onLog: log,
+      );
+      final newCache = migrationResult.data;
+
+      if (_mapEquality.equals(cache, newCache)) {
+        if (migrationResult.didMigrate) {
+          isDirty = true;
+          _scheduleSave();
+        }
+        return;
+      }
 
       final changedKeys = <String>{};
-      for (final entry in flatDecoded.entries) {
-        if (!cache.containsKey(entry.key) ||
-            !const DeepCollectionEquality().equals(cache[entry.key], entry.value)) {
+      for (final entry in newCache.entries) {
+        if (!cache.containsKey(entry.key) || !_deepEquality.equals(cache[entry.key], entry.value)) {
           changedKeys.add(entry.key);
         }
       }
       for (final key in cache.keys) {
-        if (!flatDecoded.containsKey(key)) {
+        if (!newCache.containsKey(key)) {
           changedKeys.add(key);
         }
       }
 
       cache.clear();
-      cache.addAll(flatDecoded);
+      cache.addAll(newCache);
+      _changeVersion++;
+
+      if (migrationResult.didMigrate) {
+        isDirty = true;
+        _scheduleSave();
+      } else {
+        _debounceTimer?.cancel();
+        isDirty = false;
+      }
 
       for (final key in changedKeys) {
         _notifyKey(key);
@@ -244,8 +396,7 @@ final class ConfigEngine {
       );
     }
 
-    final logger = onLog ??
-        (!bool.fromEnvironment('dart.vm.product') ? (msg) => print('[Config] $msg') : null);
+    final logger = onLog ?? (_kDebugMode ? (String msg) => print('[Config] $msg') : null);
 
     Map<String, dynamic> cache;
     bool isDirty = false;
@@ -267,7 +418,6 @@ final class ConfigEngine {
           targetVersion: schemaVersion,
           migrations: migrations,
           onLog: logger,
-          onError: onError,
         );
 
         cache = migrationResult.data;
@@ -284,13 +434,17 @@ final class ConfigEngine {
         if (onError != null) {
           onError(e, s);
         } else {
-          print('[Config ERROR] Failed to load existing config. Resetting to defaults.: $e');
+          print(
+            '[Config ERROR] Failed to load existing config. Resetting to defaults.: $e',
+          );
         }
       }
     }
 
     return ConfigEngine(
       file: configFile,
+      schemaVersion: schemaVersion,
+      migrations: migrations,
       cache: cache,
       isDirty: isDirty,
       onLog: onLog,
@@ -305,7 +459,10 @@ final class ConfigEngine {
     );
   }
 
-  static Future<void> quarantineFile(File file, void Function(String message)? log) async {
+  static Future<void> quarantineFile(
+    File file,
+    void Function(String message)? log,
+  ) async {
     if (!file.existsSync()) return;
     try {
       final corruptFile = File('${file.path}.corrupt');
@@ -333,8 +490,10 @@ final class ConfigEngine {
     if (_isDisposed) return;
     _isDisposed = true;
 
-    if (_debounceTimer?.isActive ?? false) {
-      _debounceTimer?.cancel();
+    final shouldWrite = isDirty || (_debounceTimer?.isActive ?? false);
+    _debounceTimer?.cancel();
+
+    if (shouldWrite) {
       final targetFile = file;
       if (targetFile != null) {
         try {
@@ -345,7 +504,21 @@ final class ConfigEngine {
             '  ',
             (o) => o.toString(),
           ).convert(unflattenConfigMap(cache));
-          targetFile.writeAsStringSync(jsonStr, flush: true);
+
+          final tempFile = File(
+            '${targetFile.path}.${pid}_${_writeNonce++}.tmp',
+          );
+          tempFile.writeAsStringSync(jsonStr, flush: true);
+
+          try {
+            tempFile.renameSync(targetFile.path);
+          } on FileSystemException {
+            tempFile.copySync(targetFile.path);
+            try {
+              tempFile.deleteSync();
+            } catch (_) {}
+          }
+          isDirty = false;
           log('Synchronously written to disk on dispose.');
         } catch (e, s) {
           logError('Failed to write config on dispose', e, s);

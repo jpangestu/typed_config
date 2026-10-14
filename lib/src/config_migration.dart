@@ -78,6 +78,7 @@ final class ConfigMigrationContext {
   /// If [key] was already present, its previous value is replaced.
   void operator []=(String key, dynamic value) {
     if (value is Map) {
+      data.remove(key);
       data.addAll(flattenConfigMap(value, key));
     } else {
       data[key] = value;
@@ -108,7 +109,6 @@ ConfigMigrationResult migrateConfigData({
   required int targetVersion,
   Map<int, ConfigMigrator>? migrations,
   void Function(String message)? onLog,
-  void Function(Object error, StackTrace stackTrace)? onError,
 }) {
   if (targetVersion < 1) {
     throw ArgumentError.value(
@@ -166,7 +166,6 @@ ConfigMigrationResult migrateConfigData({
           migrator(ConfigMigrationContext(workingData));
         } catch (e, s) {
           onLog?.call('Migration to schema version v$v failed: $e');
-          onError?.call(e, s);
           throw ConfigMigrationException(
             fromVersion: fromVersion,
             toVersion: targetVersion,
@@ -261,6 +260,12 @@ int parseSchemaVersion(dynamic value) {
 /// Recursively flattens a nested map into a flat map with dot-separated keys.
 @internal
 Map<String, dynamic> flattenConfigMap(Map<dynamic, dynamic> nested, [String prefix = '']) {
+  if (nested.isEmpty) {
+    return prefix.isEmpty
+        ? <String, dynamic>{}
+        : <String, dynamic>{prefix: const <String, dynamic>{}};
+  }
+
   final result = <String, dynamic>{};
 
   void flatten(Map<dynamic, dynamic> map, String p) {
@@ -268,8 +273,10 @@ Map<String, dynamic> flattenConfigMap(Map<dynamic, dynamic> nested, [String pref
       final key = entry.key.toString();
       final fullKey = p.isEmpty ? key : '$p.$key';
       final val = entry.value;
-      if (val is Map) {
+      if (val is Map && val.isNotEmpty) {
         flatten(val, fullKey);
+      } else if (val is Map) {
+        result[fullKey] = const <String, dynamic>{};
       } else {
         result[fullKey] = val;
       }

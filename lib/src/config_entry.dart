@@ -35,9 +35,7 @@ final class ConfigEntry<T> {
   /// Falls back to [defaultValue] if the entry is not explicitly set in the cache.
   T get value {
     final raw = _engine.readRaw(key);
-    if (raw == null && !_engine.containsKey(key)) {
-      return defaultValue;
-    }
+    if (raw == null) return defaultValue;
     return parse(raw);
   }
 
@@ -87,7 +85,7 @@ final class ConfigEntry<T> {
       try {
         return toJson!(val);
       } catch (_) {
-        return defaultValue;
+        return toJson!(defaultValue);
       }
     }
     return val;
@@ -95,10 +93,11 @@ final class ConfigEntry<T> {
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || other is ConfigEntry<T> && key == other.key;
+      identical(this, other) ||
+      other is ConfigEntry<T> && identical(_engine, other._engine) && key == other.key;
 
   @override
-  int get hashCode => key.hashCode;
+  int get hashCode => Object.hash(identityHashCode(_engine), key);
 
   @override
   String toString() => 'ConfigEntry<$T>($key)';
