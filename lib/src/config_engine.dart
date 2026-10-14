@@ -147,7 +147,7 @@ final class ConfigEngine {
     _scheduleSave();
   }
 
-  void resetKey(String key) {
+  void resetKey(String key, {bool scheduleSave = true}) {
     if (_isDisposed) return;
     bool removed = cache.remove(key) != null;
     if (removeKeyDescendants(cache, key)) {
@@ -158,7 +158,9 @@ final class ConfigEngine {
     _changeVersion++;
     isDirty = true;
     _notifyKey(key);
-    _scheduleSave();
+    if (scheduleSave) {
+      _scheduleSave();
+    }
   }
 
   Future<void> resetAll() async {
@@ -171,7 +173,6 @@ final class ConfigEngine {
     _changeVersion++;
     isDirty = true;
     _notifyKey('*');
-    _scheduleSave();
     await flush();
   }
 
@@ -193,6 +194,13 @@ final class ConfigEngine {
       const Duration(milliseconds: 300),
       () => unawaited(flush()),
     );
+  }
+
+  Future<void> _deleteTempQuietly(File? tempFile) async {
+    if (tempFile == null) return;
+    try {
+      if (tempFile.existsSync()) await tempFile.delete();
+    } catch (_) {}
   }
 
   Future<void> flush() {
@@ -225,10 +233,10 @@ final class ConfigEngine {
         _ignoreWatcherUntil = DateTime.now().add(const Duration(seconds: 2));
         await tempFile.writeAsString(jsonString, flush: true);
 
+        // If dispose() ran while writing tempFile, dispose() already wrote the latest
+        // state synchronously. Abort before touching targetFile.
         if (_isDisposed) {
-          try {
-            if (tempFile.existsSync()) await tempFile.delete();
-          } catch (_) {}
+          await _deleteTempQuietly(tempFile);
           completer.complete();
           return;
         }
@@ -237,17 +245,13 @@ final class ConfigEngine {
           await tempFile.rename(targetFile.path);
         } on FileSystemException {
           if (_isDisposed) {
-            try {
-              if (tempFile.existsSync()) await tempFile.delete();
-            } catch (_) {}
+            await _deleteTempQuietly(tempFile);
             completer.complete();
             return;
           }
           // Fallback for Windows lock contention
           await tempFile.copy(targetFile.path);
-          try {
-            await tempFile.delete();
-          } catch (_) {}
+          await _deleteTempQuietly(tempFile);
         }
 
         _ignoreWatcherUntil = DateTime.now().add(
@@ -259,11 +263,7 @@ final class ConfigEngine {
         log('Successfully written to disk.');
         completer.complete();
       } catch (e, s) {
-        if (tempFile != null) {
-          try {
-            if (tempFile.existsSync()) await tempFile.delete();
-          } catch (_) {}
-        }
+        await _deleteTempQuietly(tempFile);
         logError('Failed to write config to disk', e, s);
         completer.completeError(e, s);
       } finally {

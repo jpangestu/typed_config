@@ -5,6 +5,11 @@ import 'config_engine.dart';
 
 const DeepCollectionEquality _entryDeepEquality = DeepCollectionEquality();
 
+Type _typeOf<X>() => X;
+
+final Type _nullableDoubleType = _typeOf<double?>();
+final Type _nullableIntType = _typeOf<int?>();
+
 /// A strongly-typed configuration entry handle.
 ///
 /// Provides synchronous reads via [value], immediate in-memory updates with
@@ -82,12 +87,12 @@ final class ConfigEntry<T> {
         return defaultValue;
       }
     }
-    // Handle JSON num-to-double coercion
-    if (defaultValue is double && json is num) {
+    // Handle JSON num-to-double coercion (including nullable double?)
+    if ((T == double || T == _nullableDoubleType) && json is num) {
       return json.toDouble() as T;
     }
-    // Handle JSON num-to-int coercion
-    if (defaultValue is int && json is num) {
+    // Handle JSON num-to-int coercion (including nullable int?)
+    if ((T == int || T == _nullableIntType) && json is num) {
       return json.toInt() as T;
     }
     if (json is T) return json;

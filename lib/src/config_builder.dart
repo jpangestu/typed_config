@@ -4,6 +4,11 @@ import 'config_engine.dart';
 import 'config_entry.dart';
 import 'config_migration.dart';
 
+Type _typeOf<X>() => X;
+
+final Type _nullableDoubleType = _typeOf<double?>();
+final Type _nullableIntType = _typeOf<int?>();
+
 /// A configuration construction context passed to class primary constructors.
 ///
 /// Used during application bootstrap to build strongly-typed [ConfigEntry] instances
@@ -100,32 +105,39 @@ final class ConfigBuilder {
   ConfigEntry<List<T>> defineList<T>(String key, List<T> defaultValue) {
     final fullKey = _resolveKey(key);
     final unmodifiableDefault = List<T>.unmodifiable(defaultValue);
+    final isDoubleElem = T == double || T == _nullableDoubleType;
+    final isIntElem = T == int || T == _nullableIntType;
+
     return ConfigEntry<List<T>>(
       key: fullKey,
       defaultValue: unmodifiableDefault,
       engine: engine,
       fromJson: (json) {
-        if (json is List) {
-          try {
-            if (T == double) {
-              return List<T>.unmodifiable(
-                json.whereType<num>().map((e) => e.toDouble() as T),
+        if (json is! List) return unmodifiableDefault;
+        try {
+          final parsed = <T>[];
+          for (final item in json) {
+            if (item == null && null is T) {
+              parsed.add(null as T);
+            } else if (isDoubleElem && item is num) {
+              parsed.add(item.toDouble() as T);
+            } else if (isIntElem && item is num) {
+              parsed.add(item.toInt() as T);
+            } else if (item is T) {
+              parsed.add(item);
+            } else {
+              throw FormatException(
+                'Invalid list element "${item.runtimeType}" for List<$T> in key "$fullKey".',
               );
             }
-            if (T == int) {
-              return List<T>.unmodifiable(
-                json.whereType<num>().map((e) => e.toInt() as T),
-              );
-            }
-            return List<T>.unmodifiable(json.whereType<T>());
-          } catch (e, s) {
-            engine.logError('Failed to parse list for key "$fullKey"', e, s);
-            return unmodifiableDefault;
           }
+          return List<T>.unmodifiable(parsed);
+        } catch (e, s) {
+          engine.logError('Failed to parse list for key "$fullKey"', e, s);
+          return unmodifiableDefault;
         }
-        return unmodifiableDefault;
       },
-      toJson: (val) => val,
+      toJson: (val) => List<T>.unmodifiable(val),
     );
   }
 }

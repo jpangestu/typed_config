@@ -85,8 +85,21 @@ class Config {
   String _scopedKey(String key) {
     if (prefix.isEmpty) return key;
     if (key.isEmpty) return prefix;
-    if (key == prefix || key.startsWith('$prefix.')) return key;
     return '$prefix.$key';
+  }
+
+  String _unscopeKey(String fullKey) {
+    if (prefix.isEmpty || fullKey == '*') return fullKey;
+    if (fullKey == prefix) return '*';
+    final scopedPrefix = '$prefix.';
+    if (fullKey.startsWith(scopedPrefix)) {
+      return fullKey.substring(scopedPrefix.length);
+    }
+    // An ancestor of `prefix` was modified/reset
+    if (prefix.startsWith('$fullKey.')) {
+      return '*';
+    }
+    return fullKey;
   }
 
   // ==============================================================================================
@@ -111,17 +124,18 @@ class Config {
     if (prefix.isEmpty) {
       await engine.resetAll();
     } else {
-      engine.resetKey(prefix);
+      engine.resetKey(prefix, scheduleSave: false);
       await engine.flush();
     }
   }
 
-  /// Broadcast stream emitting events when [key] or wildcard `'*'` changes.
+  /// Broadcast stream emitting relative keys when [key] or wildcard `'*'` changes.
   Stream<String> watchKey(String key) {
-    if (key == '*') {
-      return prefix.isEmpty ? engine.watchKey('*') : engine.watchKey(prefix);
+    if (prefix.isEmpty) {
+      return engine.watchKey(key);
     }
-    return engine.watchKey(_scopedKey(key));
+    final target = key == '*' ? prefix : _scopedKey(key);
+    return engine.watchKey(target).map(_unscopeKey);
   }
 
   // ==============================================================================================
@@ -162,12 +176,13 @@ class Config {
       onError: onError,
     );
     final builder = ConfigBuilder(engine);
+    final previousPending = _pendingEngine;
     _pendingEngine = engine;
     final T instance;
     try {
       instance = factory(builder)..attachEngine(engine);
     } finally {
-      _pendingEngine = null;
+      _pendingEngine = previousPending;
     }
 
     if (engine.isDirty) {
@@ -184,11 +199,12 @@ class Config {
   ]) {
     final engine = ConfigEngine.inMemory(initialCache);
     final builder = ConfigBuilder(engine);
+    final previousPending = _pendingEngine;
     _pendingEngine = engine;
     try {
       return factory(builder)..attachEngine(engine);
     } finally {
-      _pendingEngine = null;
+      _pendingEngine = previousPending;
     }
   }
 
