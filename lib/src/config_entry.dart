@@ -29,6 +29,9 @@ final class ConfigEntry<T> {
   /// Optional serializer to convert [T] into a JSON-encodable object.
   final dynamic Function(T value)? toJson;
 
+  int _cachedVersion = -1;
+  T? _cachedValue;
+
   @internal
   ConfigEntry({
     required this.key,
@@ -38,23 +41,56 @@ final class ConfigEntry<T> {
     this.toJson,
   }) : _engine = engine;
 
-  /// Synchronously returns the typed value from memory.
+  /// Synchronously returns the typed value from memory in O(1) time.
   ///
   /// Falls back to [defaultValue] if the entry is not explicitly set in the cache.
   T get value {
+    final currentVersion = _engine.changeVersion;
+    if (_cachedVersion == currentVersion) {
+      return _cachedValue as T;
+    }
+    final resolved = _resolveValue();
+    _cachedValue = resolved;
+    _cachedVersion = currentVersion;
+    return resolved;
+  }
+
+  T _resolveValue() {
+    if (_engine.cache.containsKey(key)) {
+      final raw = _engine.cache[key];
+      if (raw == null) {
+        return (null is T) ? null as T : defaultValue;
+      }
+      return parse(raw);
+    }
     final raw = _engine.readRaw(key);
     if (raw == null) {
-      if (null is T && _engine.containsKey(key)) {
-        return null as T;
-      }
       return defaultValue;
     }
     return parse(raw);
   }
 
   /// Updates this setting in memory immediately and schedules a debounced disk save.
+  ///
+  /// If custom serialization via [toJson] fails, logs the error and preserves the
+  /// previous stored value without overwriting it.
   set value(T newValue) {
-    _engine.writeRaw(key, serialize(newValue));
+    if (newValue == null && null is T) {
+      _engine.writeRaw(key, null);
+      return;
+    }
+    if (toJson != null) {
+      final dynamic encoded;
+      try {
+        encoded = toJson!(newValue);
+      } catch (e, s) {
+        _engine.logError('Failed to serialize key "$key"', e, s);
+        return;
+      }
+      _engine.writeRaw(key, encoded);
+      return;
+    }
+    _engine.writeRaw(key, newValue);
   }
 
   /// Reverts this setting back to [defaultValue] and schedules a disk save.
@@ -108,7 +144,11 @@ final class ConfigEntry<T> {
       } catch (e, s) {
         _engine.logError('Failed to serialize key "$key"', e, s);
         if (defaultValue == null && null is T) return null;
-        return toJson!(defaultValue);
+        try {
+          return toJson!(defaultValue);
+        } catch (_) {
+          return null;
+        }
       }
     }
     return val;

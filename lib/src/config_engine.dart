@@ -40,6 +40,9 @@ final class ConfigEngine {
 
   bool get isDisposed => _isDisposed;
 
+  /// Monotonically increasing version counter used by [ConfigEntry] to memoize reads.
+  int get changeVersion => _changeVersion;
+
   ConfigEngine({
     this.file,
     this.schemaVersion = 1,
@@ -177,6 +180,7 @@ final class ConfigEngine {
   }
 
   Stream<String> watchKey(String key) {
+    if (key == '*') return keyChanges.stream;
     final prefix = '$key.';
     return keyChanges.stream.where(
       (changedKey) =>
@@ -210,9 +214,12 @@ final class ConfigEngine {
     _debounceTimer?.cancel();
 
     if (_currentWrite != null) {
+      if (!isDirty) return _currentWrite!.future;
       _nextWrite ??= Completer<void>();
       return _nextWrite!.future;
     }
+
+    if (!isDirty) return Future.value();
 
     final completer = Completer<void>();
     _currentWrite = completer;
@@ -271,7 +278,7 @@ final class ConfigEngine {
         if (_nextWrite != null) {
           final next = _nextWrite!;
           _nextWrite = null;
-          if (_isDisposed) {
+          if (_isDisposed || !isDirty) {
             next.complete();
           } else {
             flush().then(next.complete, onError: next.completeError);

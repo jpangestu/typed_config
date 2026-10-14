@@ -61,7 +61,8 @@ final class ConfigMigrationContext {
 
   /// Renames [oldKey] to [newKey], preserving its value or nested group entries.
   ///
-  /// Works for both leaf entries and nested map prefixes (`oldKey.*` -> `newKey.*`).
+  /// Works for both leaf entries and nested map prefixes (`oldKey.*` -> `newKey.*`),
+  /// including nesting (`'theme'` -> `'theme.mode'`) and unnesting (`'theme.mode'` -> `'theme'`).
   /// If [oldKey] does not exist, this does nothing.
   void rename(String oldKey, String newKey) {
     _validateMigrationKey(oldKey, 'oldKey');
@@ -75,19 +76,25 @@ final class ConfigMigrationContext {
     final hasExact = _data.containsKey(oldKey);
     if (!hasExact && matchingSubKeys.isEmpty) return;
 
+    // Extract source values prior to ancestor/descendant cleanup to safely support
+    // nesting (e.g. 'a' -> 'a.b') and unnesting (e.g. 'a.b' -> 'a').
+    final exactValue = hasExact ? _data.remove(oldKey) : null;
+    final movedEntries = <String, dynamic>{
+      for (final k in matchingSubKeys) k.substring(oldPrefix.length): _data.remove(k),
+    };
+
     removeKeyAncestors(_data, newKey);
     _data.remove(newKey);
     removeKeyDescendants(_data, newKey);
 
     if (hasExact) {
-      _data[newKey] = _data.remove(oldKey);
+      _data[newKey] = exactValue;
     }
 
-    for (final k in matchingSubKeys) {
-      final suffix = k.substring(oldPrefix.length);
-      final targetKey = '$newKey.$suffix';
+    for (final entry in movedEntries.entries) {
+      final targetKey = '$newKey.${entry.key}';
       removeKeyAncestors(_data, targetKey);
-      _data[targetKey] = _data.remove(k);
+      _data[targetKey] = entry.value;
     }
   }
 
@@ -362,7 +369,8 @@ int parseSchemaVersion(dynamic value) {
 /// Recursively flattens a nested map into a flat map with dot-separated keys.
 ///
 /// Throws [ArgumentError] if any nested map key is empty or contains `'.'` when
-/// [validateKeys] is `true`.
+/// [validateKeys] is `true`. Cleans up conflicting ancestor/descendant keys to
+/// preserve flat-map invariants.
 @internal
 Map<String, dynamic> flattenConfigMap(
   Map<dynamic, dynamic> nested, [
@@ -387,14 +395,31 @@ Map<String, dynamic> flattenConfigMap(
           'Map keys stored in Config cannot be empty or contain ".".',
         );
       }
+      if (key.isEmpty || key.startsWith('.') || key.endsWith('.') || key.contains('..')) {
+        continue;
+      }
       final fullKey = p.isEmpty ? key : '$p.$key';
+
+      // Prevent nested or malformed `schemaVersion.*` entries from corrupting schema tracking
+      if (fullKey.startsWith('$schemaVersionKey.')) {
+        continue;
+      }
+
       final val = entry.value;
+      if (fullKey == schemaVersionKey && val is Map) {
+        continue;
+      }
+
       if (val is Map && val.isNotEmpty) {
         flatten(val, fullKey);
-      } else if (val is Map) {
-        result[fullKey] = const <String, dynamic>{};
       } else {
-        result[fullKey] = val;
+        removeKeyAncestors(result, fullKey);
+        removeKeyDescendants(result, fullKey);
+        if (val is Map) {
+          result[fullKey] = const <String, dynamic>{};
+        } else {
+          result[fullKey] = val;
+        }
       }
     }
   }
@@ -416,7 +441,8 @@ Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
   for (final entry in flat.entries) {
     if (entry.key == schemaVersionKey) continue;
     final key = entry.key;
-    final value = entry.value;
+    final rawValue = entry.value;
+    final value = (rawValue is Map && rawValue.isEmpty) ? <String, dynamic>{} : rawValue;
 
     if (!key.contains('.')) {
       result[key] = value;

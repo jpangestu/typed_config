@@ -1,5 +1,6 @@
 import 'package:meta/meta.dart';
 
+import 'config.dart';
 import 'config_engine.dart';
 import 'config_entry.dart';
 import 'config_migration.dart';
@@ -9,7 +10,7 @@ Type _typeOf<X>() => X;
 final Type _nullableDoubleType = _typeOf<double?>();
 final Type _nullableIntType = _typeOf<int?>();
 
-/// A configuration construction context passed to class primary constructors.
+/// A configuration construction context passed to class constructors.
 ///
 /// Used during application bootstrap to build strongly-typed [ConfigEntry] instances
 /// and organized domain-driven groups with automatic dot-separated key prefixing.
@@ -65,6 +66,11 @@ final class ConfigBuilder {
     return ConfigBuilder(engine, childPrefix);
   }
 
+  /// Instantiates a nested [Config] group under the namespace [name].
+  G group<G extends Config>(String name, G Function(ConfigBuilder builder) create) {
+    return create(withPrefix(name));
+  }
+
   /// Defines a strongly-typed configuration entry.
   ConfigEntry<T> define<T>(
     String key,
@@ -102,7 +108,14 @@ final class ConfigBuilder {
   }
 
   /// Defines a list configuration entry, defensively wrapped in unmodifiable views.
-  ConfigEntry<List<T>> defineList<T>(String key, List<T> defaultValue) {
+  ///
+  /// Optionally accepts [itemFromJson] and [itemToJson] for custom element types.
+  ConfigEntry<List<T>> defineList<T>(
+    String key,
+    List<T> defaultValue, {
+    T Function(dynamic json)? itemFromJson,
+    dynamic Function(T value)? itemToJson,
+  }) {
     final fullKey = _resolveKey(key);
     final unmodifiableDefault = List<T>.unmodifiable(defaultValue);
     final isDoubleElem = T == double || T == _nullableDoubleType;
@@ -119,6 +132,8 @@ final class ConfigBuilder {
           for (final item in json) {
             if (item == null && null is T) {
               parsed.add(null as T);
+            } else if (itemFromJson != null) {
+              parsed.add(itemFromJson(item));
             } else if (isDoubleElem && item is num) {
               parsed.add(item.toDouble() as T);
             } else if (isIntElem && item is num) {
@@ -137,7 +152,11 @@ final class ConfigBuilder {
           return unmodifiableDefault;
         }
       },
-      toJson: (val) => List<T>.unmodifiable(val),
+      toJson: itemToJson != null
+          ? (val) => List<dynamic>.unmodifiable(
+                val.map((e) => (e == null && null is T) ? null : itemToJson(e)),
+              )
+          : (val) => List<T>.unmodifiable(val),
     );
   }
 }
