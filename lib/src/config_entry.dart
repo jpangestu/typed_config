@@ -4,6 +4,7 @@ import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
 
 import 'config_engine.dart';
+import 'config_migration.dart' show freezeConfigValue;
 
 const DeepCollectionEquality _entryDeepEquality = DeepCollectionEquality();
 
@@ -11,6 +12,14 @@ Type _typeOf<X>() => X;
 
 final Type _nullableDoubleType = _typeOf<double?>();
 final Type _nullableIntType = _typeOf<int?>();
+
+T _freezeDefault<T>(T value) {
+  if (value is List || value is Map) {
+    final frozen = freezeConfigValue(value);
+    if (frozen is T) return frozen;
+  }
+  return value;
+}
 
 /// A strongly-typed configuration entry handle.
 ///
@@ -41,11 +50,12 @@ final class ConfigEntry<T> {
   @internal
   ConfigEntry({
     required this.key,
-    required this.defaultValue,
+    required T defaultValue,
     required ConfigEngine engine,
     this.fromJson,
     this.toJson,
-  }) : _engine = engine;
+  })  : defaultValue = _freezeDefault<T>(defaultValue),
+        _engine = engine;
 
   /// Synchronously returns the typed value from memory in O(1) time.
   ///

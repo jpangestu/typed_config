@@ -2,6 +2,11 @@ import 'dart:collection' show UnmodifiableMapView;
 
 import 'package:meta/meta.dart';
 
+Type _typeOf<X>() => X;
+
+final Type _nullableDoubleType = _typeOf<double?>();
+final Type _nullableIntType = _typeOf<int?>();
+
 /// Key used in JSON storage to track the current configuration schema version.
 @internal
 const String schemaVersionKey = 'schemaVersion';
@@ -117,14 +122,18 @@ final class ConfigMigrationContext {
 
   /// Transforms the value of [key] by passing its current value to the [updater] callback.
   ///
-  /// If [key] exists (either as a leaf or nested group) and its stored value is of type [T],
-  /// the value is replaced with whatever [updater] returns.
+  /// If [key] exists (either as a leaf or nested group) and its stored value is of type [T]
+  /// (including numeric coercion between `int` and `double`), the value is replaced with
+  /// whatever [updater] returns.
   void transform<T>(String key, dynamic Function(T current) updater) {
-    if (containsKey(key)) {
-      final current = this[key];
-      if (current is T) {
-        this[key] = updater(current);
-      }
+    if (!containsKey(key)) return;
+    final current = this[key];
+    if ((T == double || T == _nullableDoubleType) && current is num) {
+      this[key] = updater(current.toDouble() as T);
+    } else if ((T == int || T == _nullableIntType) && current is num) {
+      this[key] = updater(current.toInt() as T);
+    } else if (current is T) {
+      this[key] = updater(current);
     }
   }
 

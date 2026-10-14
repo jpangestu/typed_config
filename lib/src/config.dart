@@ -152,8 +152,17 @@ class Config {
   /// Immediately writes in-memory configuration changes to disk without waiting for the debounce timer.
   Future<void> flush() => _engine.flush();
 
-  /// Starts desktop external file watcher.
-  void startWatcher() => _engine.startWatcher();
+  /// Starts desktop external file watcher on the root configuration instance.
+  ///
+  /// Throws a [StateError] if called on a scoped child group.
+  void startWatcher() {
+    if (prefix.isNotEmpty) {
+      throw StateError(
+        'Cannot call startWatcher() on scoped group "$prefix". Call it on the root Config instance.',
+      );
+    }
+    _engine.startWatcher();
+  }
 
   /// Re-reads configuration from disk, updating the cache and notifying listeners of changes.
   Future<void> reloadFromDisk() => _engine.reloadFromDisk();
@@ -200,11 +209,19 @@ class Config {
     return factory(ConfigBuilder(engine));
   }
 
-  /// Releases active timers, file watchers, and streams.
+  /// Releases active timers, file watchers, and streams on the root configuration instance.
   ///
   /// Synchronously saves any pending dirty changes to disk before closing to
   /// prevent data loss on fast application exit.
-  void dispose() => _engine.dispose();
+  /// Throws a [StateError] if called on a scoped child group.
+  void dispose() {
+    if (prefix.isNotEmpty) {
+      throw StateError(
+        'Cannot dispose scoped group "$prefix". Call dispose() on the root Config instance.',
+      );
+    }
+    _engine.dispose();
+  }
 
   /// Returns an unmodifiable snapshot map of configuration entries in memory for this scope.
   Map<String, dynamic> toFlatJson() {

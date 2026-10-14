@@ -49,6 +49,7 @@ final class ConfigBuilder {
         '"$schemaVersionKey" is reserved for internal schema tracking.',
       );
     }
+    engine.registerKey(fullKey);
     return fullKey;
   }
 
@@ -63,6 +64,7 @@ final class ConfigBuilder {
         '"$schemaVersionKey" is reserved for internal schema tracking.',
       );
     }
+    engine.registerGroup(childPrefix);
     return ConfigBuilder(engine, childPrefix);
   }
 
@@ -157,6 +159,63 @@ final class ConfigBuilder {
                 val.map((e) => (e == null && null is T) ? null : itemToJson(e)),
               )
           : (val) => List<T>.unmodifiable(val),
+    );
+  }
+
+  /// Defines a strongly-typed map configuration entry (`Map<String, V>`), defensively
+  /// wrapped in unmodifiable views.
+  ///
+  /// Optionally accepts [valueFromJson] and [valueToJson] for custom value types.
+  ConfigEntry<Map<String, V>> defineMap<V>(
+    String key,
+    Map<String, V> defaultValue, {
+    V Function(dynamic json)? valueFromJson,
+    dynamic Function(V value)? valueToJson,
+  }) {
+    final fullKey = _resolveKey(key);
+    final unmodifiableDefault = Map<String, V>.unmodifiable(defaultValue);
+    final isDoubleVal = V == double || V == _nullableDoubleType;
+    final isIntVal = V == int || V == _nullableIntType;
+
+    return ConfigEntry<Map<String, V>>(
+      key: fullKey,
+      defaultValue: unmodifiableDefault,
+      engine: engine,
+      fromJson: (json) {
+        if (json is! Map) return unmodifiableDefault;
+        try {
+          final parsed = <String, V>{};
+          for (final entry in json.entries) {
+            final k = entry.key.toString();
+            final val = entry.value;
+            if (val == null && null is V) {
+              parsed[k] = null as V;
+            } else if (valueFromJson != null) {
+              parsed[k] = valueFromJson(val);
+            } else if (isDoubleVal && val is num) {
+              parsed[k] = val.toDouble() as V;
+            } else if (isIntVal && val is num) {
+              parsed[k] = val.toInt() as V;
+            } else if (val is V) {
+              parsed[k] = val;
+            } else {
+              throw FormatException(
+                'Invalid map value "${val.runtimeType}" for Map<String, $V> at "$fullKey.$k".',
+              );
+            }
+          }
+          return Map<String, V>.unmodifiable(parsed);
+        } catch (e, s) {
+          engine.logError('Failed to parse map for key "$fullKey"', e, s);
+          return unmodifiableDefault;
+        }
+      },
+      toJson: valueToJson != null
+          ? (val) => Map<String, dynamic>.unmodifiable({
+                for (final e in val.entries)
+                  e.key: (e.value == null && null is V) ? null : valueToJson(e.value),
+              })
+          : (val) => Map<String, V>.unmodifiable(val),
     );
   }
 }

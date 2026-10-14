@@ -27,6 +27,9 @@ final class ConfigEngine {
   final void Function(String message)? onLog;
   final void Function(Object error, StackTrace stackTrace)? onError;
 
+  final Set<String> _registeredKeys = <String>{};
+  final Set<String> _registeredGroups = <String>{};
+
   Timer? _debounceTimer;
   Timer? _watcherDebounceTimer;
   Completer<void>? _currentWrite;
@@ -56,6 +59,73 @@ final class ConfigEngine {
   })  : cache = cache ?? <String, dynamic>{},
         keyChanges = keyChanges ?? StreamController<String>.broadcast();
 
+  /// Registers a leaf configuration key and validates that no duplicate or
+  /// conflicting group/ancestor key exists.
+  void registerKey(String fullKey) {
+    if (_registeredKeys.contains(fullKey)) {
+      throw ArgumentError.value(
+        fullKey,
+        'key',
+        'Duplicate configuration key "$fullKey" is already defined.',
+      );
+    }
+    if (_registeredGroups.contains(fullKey)) {
+      throw ArgumentError.value(
+        fullKey,
+        'key',
+        'Configuration key "$fullKey" conflicts with an existing group prefix.',
+      );
+    }
+    int dotIndex = fullKey.indexOf('.');
+    while (dotIndex != -1) {
+      final ancestor = fullKey.substring(0, dotIndex);
+      if (_registeredKeys.contains(ancestor)) {
+        throw ArgumentError.value(
+          fullKey,
+          'key',
+          'Configuration key "$fullKey" conflicts with ancestor key "$ancestor".',
+        );
+      }
+      dotIndex = fullKey.indexOf('.', dotIndex + 1);
+    }
+    final prefix = '$fullKey.';
+    for (final existing in _registeredKeys) {
+      if (existing.startsWith(prefix)) {
+        throw ArgumentError.value(
+          fullKey,
+          'key',
+          'Configuration key "$fullKey" conflicts with descendant key "$existing".',
+        );
+      }
+    }
+    _registeredKeys.add(fullKey);
+  }
+
+  /// Registers a group namespace prefix and validates that it does not collide
+  /// with an already registered leaf key.
+  void registerGroup(String prefix) {
+    if (_registeredKeys.contains(prefix)) {
+      throw ArgumentError.value(
+        prefix,
+        'name',
+        'Group prefix "$prefix" conflicts with an existing configuration key.',
+      );
+    }
+    int dotIndex = prefix.indexOf('.');
+    while (dotIndex != -1) {
+      final ancestor = prefix.substring(0, dotIndex);
+      if (_registeredKeys.contains(ancestor)) {
+        throw ArgumentError.value(
+          prefix,
+          'name',
+          'Group prefix "$prefix" conflicts with ancestor configuration key "$ancestor".',
+        );
+      }
+      dotIndex = prefix.indexOf('.', dotIndex + 1);
+    }
+    _registeredGroups.add(prefix);
+  }
+
   void log(String message) {
     if (onLog != null) {
       onLog!(message);
@@ -66,8 +136,9 @@ final class ConfigEngine {
 
   void logError(String message, Object error, StackTrace stackTrace) {
     if (onError != null) {
+      onLog?.call('[ERROR] $message: $error');
       onError!(error, stackTrace);
-    } else {
+    } else if (_kDebugMode) {
       print('[Config ERROR] $message: $error');
     }
   }
@@ -194,7 +265,7 @@ final class ConfigEngine {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(
       const Duration(milliseconds: 300),
-      () => unawaited(flush()),
+      () => unawaited(flush().catchError((_) {})),
     );
   }
 
@@ -223,75 +294,86 @@ final class ConfigEngine {
     _currentWrite = completer;
 
     () async {
-      final writeVersion = _changeVersion;
       File? tempFile;
       try {
-        final flatMap = Map<String, dynamic>.from(cache);
-        final nestedMap = unflattenConfigMap(flatMap);
-        final jsonString = const JsonEncoder.withIndent('  ').convert(nestedMap);
+        while (!_isDisposed && isDirty) {
+          _debounceTimer?.cancel();
+          final writeVersion = _changeVersion;
+          final flatMap = Map<String, dynamic>.from(cache);
+          final nestedMap = unflattenConfigMap(flatMap);
+          final jsonString = const JsonEncoder.withIndent('  ').convert(nestedMap);
 
-        if (!await targetFile.parent.exists()) {
-          await targetFile.parent.create(recursive: true);
-        }
-
-        if (_isDisposed) {
-          completer.complete();
-          return;
-        }
-
-        tempFile = File('${targetFile.path}.${pid}_${_writeNonce++}.tmp');
-        _ignoreWatcherUntil = DateTime.now().add(const Duration(seconds: 2));
-        await tempFile.writeAsString(jsonString, flush: true);
-
-        // If dispose() ran or a newer write occurred while writing tempFile, abort before
-        // touching targetFile so we never overwrite newer state.
-        if (_isDisposed || _changeVersion != writeVersion) {
-          await _deleteTempQuietly(tempFile);
-          if (!_isDisposed && _changeVersion != writeVersion) {
-            _nextWrite ??= Completer<void>();
+          if (!await targetFile.parent.exists()) {
+            await targetFile.parent.create(recursive: true);
           }
-          completer.complete();
-          return;
-        }
 
-        try {
-          await tempFile.rename(targetFile.path);
-        } on FileSystemException {
+          if (_isDisposed) {
+            completer.complete();
+            return;
+          }
+
+          tempFile = File('${targetFile.path}.${pid}_${_writeNonce++}.tmp');
+          _ignoreWatcherUntil = DateTime.now().add(const Duration(seconds: 2));
+          await tempFile.writeAsString(jsonString, flush: true);
+
+          // If dispose() ran or a newer write occurred while writing tempFile, discard
+          // tempFile and retry with the latest snapshot so we never overwrite newer state.
           if (_isDisposed || _changeVersion != writeVersion) {
             await _deleteTempQuietly(tempFile);
-            if (!_isDisposed && _changeVersion != writeVersion) {
-              _nextWrite ??= Completer<void>();
+            tempFile = null;
+            if (_isDisposed) {
+              completer.complete();
+              return;
+            }
+            continue;
+          }
+
+          try {
+            await tempFile.rename(targetFile.path);
+          } on FileSystemException {
+            if (_isDisposed || _changeVersion != writeVersion) {
+              await _deleteTempQuietly(tempFile);
+              tempFile = null;
+              if (_isDisposed) {
+                completer.complete();
+                return;
+              }
+              continue;
+            }
+            // Fallback for Windows lock contention
+            await tempFile.copy(targetFile.path);
+            await _deleteTempQuietly(tempFile);
+          }
+          tempFile = null;
+
+          // If dispose() ran concurrently while the async rename/copy was in-flight in the OS
+          // thread pool and wrote a newer version, re-apply the synchronous dispose write.
+          if (_isDisposed) {
+            if (_disposedWriteVersion > writeVersion) {
+              _writeSync(targetFile);
             }
             completer.complete();
             return;
           }
-          // Fallback for Windows lock contention
-          await tempFile.copy(targetFile.path);
-          await _deleteTempQuietly(tempFile);
-        }
 
-        // If dispose() ran concurrently while the async rename/copy was in-flight in the OS
-        // thread pool and wrote a newer version, re-apply the synchronous dispose write.
-        if (_isDisposed) {
-          if (_disposedWriteVersion > writeVersion) {
-            _writeSync(targetFile);
+          _ignoreWatcherUntil = DateTime.now().add(
+            const Duration(milliseconds: 250),
+          );
+          if (_changeVersion == writeVersion) {
+            isDirty = false;
           }
+          log('Successfully written to disk.');
+          break;
+        }
+        if (!completer.isCompleted) {
           completer.complete();
-          return;
         }
-
-        _ignoreWatcherUntil = DateTime.now().add(
-          const Duration(milliseconds: 250),
-        );
-        if (_changeVersion == writeVersion) {
-          isDirty = false;
-        }
-        log('Successfully written to disk.');
-        completer.complete();
       } catch (e, s) {
         await _deleteTempQuietly(tempFile);
         logError('Failed to write config to disk', e, s);
-        completer.completeError(e, s);
+        if (!completer.isCompleted) {
+          completer.completeError(e, s);
+        }
       } finally {
         _currentWrite = null;
         if (_nextWrite != null) {
@@ -319,28 +401,45 @@ final class ConfigEngine {
     return false;
   }
 
+  static bool _matchesTargetFile(FileSystemEvent event, String targetName) {
+    if (p.basename(event.path) == targetName && event.type != FileSystemEvent.delete) {
+      return true;
+    }
+    if (event is FileSystemMoveEvent &&
+        event.destination != null &&
+        p.basename(event.destination!) == targetName) {
+      return true;
+    }
+    return false;
+  }
+
   void startWatcher() {
     final targetFile = file;
     if (targetFile == null || _isDisposed) return;
     if (!FileSystemEntity.isWatchSupported) return;
 
     _fileWatcherSubscription?.cancel();
+    final targetName = p.basename(targetFile.path);
 
     try {
-      _fileWatcherSubscription = targetFile.parent.watch().listen((event) {
-        if (p.basename(event.path) == p.basename(targetFile.path) &&
-            event.type != FileSystemEvent.delete) {
-          if (_shouldIgnoreWatcherEvent) return;
-          _watcherDebounceTimer?.cancel();
-          _watcherDebounceTimer = Timer(
-            const Duration(milliseconds: 150),
-            () async {
-              if (_shouldIgnoreWatcherEvent) return;
-              await reloadFromDisk();
-            },
-          );
-        }
-      });
+      _fileWatcherSubscription = targetFile.parent.watch().listen(
+        (event) {
+          if (_matchesTargetFile(event, targetName)) {
+            if (_shouldIgnoreWatcherEvent) return;
+            _watcherDebounceTimer?.cancel();
+            _watcherDebounceTimer = Timer(
+              const Duration(milliseconds: 150),
+              () async {
+                if (_shouldIgnoreWatcherEvent) return;
+                await reloadFromDisk();
+              },
+            );
+          }
+        },
+        onError: (Object e, StackTrace s) {
+          log('File watcher error: $e');
+        },
+      );
     } catch (e) {
       log('Could not start file watcher: $e');
     }
@@ -468,8 +567,9 @@ final class ConfigEngine {
         cache = <String, dynamic>{schemaVersionKey: schemaVersion};
         isDirty = true;
         if (onError != null) {
+          onLog?.call('[ERROR] Failed to load existing config. Resetting to defaults.: $e');
           onError(e, s);
-        } else {
+        } else if (_kDebugMode) {
           print(
             '[Config ERROR] Failed to load existing config. Resetting to defaults.: $e',
           );
