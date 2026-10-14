@@ -118,7 +118,8 @@ final class ConfigBuilder {
               );
             }
             return List<T>.unmodifiable(json.whereType<T>());
-          } catch (_) {
+          } catch (e, s) {
+            engine.logError('Failed to parse list for key "$fullKey"', e, s);
             return unmodifiableDefault;
           }
         }

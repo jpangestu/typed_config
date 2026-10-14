@@ -7,7 +7,7 @@ import 'config_builder.dart';
 import 'config_engine.dart';
 import 'config_entry.dart';
 import 'config_migration.dart' as migration;
-import 'config_migration.dart' show ConfigMigrator;
+import 'config_migration.dart' show ConfigMigrator, unflattenConfigMap;
 
 /// Base class for strongly-typed application configurations.
 ///
@@ -28,6 +28,8 @@ class Config {
   /// Key used in JSON storage to track the current configuration schema version.
   static const String schemaVersionKey = migration.schemaVersionKey;
 
+  static ConfigEngine? _pendingEngine;
+
   ConfigEngine? _engine;
 
   /// Internal lifecycle hook to attach the backing [ConfigEngine].
@@ -41,7 +43,10 @@ class Config {
   ConfigEngine get engine {
     final e = _engine;
     if (e == null) {
-      throw StateError('Config instance is not attached to a ConfigEngine.');
+      throw StateError(
+        'Config instance is not attached to a ConfigEngine. '
+        'Pass the ConfigBuilder to super(builder) in your subclass constructor.',
+      );
     }
     return e;
   }
@@ -74,9 +79,14 @@ class Config {
 
   /// Creates a [Config] instance. When passed a [ConfigBuilder], binds directly to its engine and prefix.
   Config([ConfigBuilder? initialBuilder]) : prefix = initialBuilder?.prefix ?? '' {
-    if (initialBuilder != null) {
-      _engine = initialBuilder.engine;
-    }
+    _engine = initialBuilder?.engine ?? _pendingEngine;
+  }
+
+  String _scopedKey(String key) {
+    if (prefix.isEmpty) return key;
+    if (key.isEmpty) return prefix;
+    if (key == prefix || key.startsWith('$prefix.')) return key;
+    return '$prefix.$key';
   }
 
   // ==============================================================================================
@@ -86,21 +96,33 @@ class Config {
   /// Whether [entry] has an explicitly stored value in the cache.
   bool contains<T>(ConfigEntry<T> entry) => engine.containsKey(entry.key);
 
-  /// Synchronously returns raw stored value for [key].
-  dynamic readRaw(String key) => engine.readRaw(key);
+  /// Synchronously returns raw stored value for [key] (scoped to [prefix] if non-empty).
+  dynamic readRaw(String key) => engine.readRaw(_scopedKey(key));
 
-  /// Stores [value] for [key] in memory and schedules a debounced save to disk.
-  void writeRaw(String key, dynamic value) => engine.writeRaw(key, value);
+  /// Stores [value] for [key] (scoped to [prefix] if non-empty) in memory and schedules a debounced save to disk.
+  void writeRaw(String key, dynamic value) => engine.writeRaw(_scopedKey(key), value);
 
-  /// Removes [key] from the cache and schedules saving to disk.
-  void resetKey(String key) => engine.resetKey(key);
+  /// Removes [key] (scoped to [prefix] if non-empty) from the cache and schedules saving to disk.
+  void resetKey(String key) => engine.resetKey(_scopedKey(key));
 
-  /// Clears all configuration overrides, reverts all entries to defaults,
+  /// Clears all configuration overrides in this scope, reverts entries to defaults,
   /// and flushes to disk immediately.
-  Future<void> resetAll() => engine.resetAll();
+  Future<void> resetAll() async {
+    if (prefix.isEmpty) {
+      await engine.resetAll();
+    } else {
+      engine.resetKey(prefix);
+      await engine.flush();
+    }
+  }
 
   /// Broadcast stream emitting events when [key] or wildcard `'*'` changes.
-  Stream<String> watchKey(String key) => engine.watchKey(key);
+  Stream<String> watchKey(String key) {
+    if (key == '*') {
+      return prefix.isEmpty ? engine.watchKey('*') : engine.watchKey(prefix);
+    }
+    return engine.watchKey(_scopedKey(key));
+  }
 
   // ==============================================================================================
   // Disk Writes & External Reload
@@ -140,7 +162,13 @@ class Config {
       onError: onError,
     );
     final builder = ConfigBuilder(engine);
-    final instance = factory(builder)..attachEngine(engine);
+    _pendingEngine = engine;
+    final T instance;
+    try {
+      instance = factory(builder)..attachEngine(engine);
+    } finally {
+      _pendingEngine = null;
+    }
 
     if (engine.isDirty) {
       await instance.flush();
@@ -156,7 +184,12 @@ class Config {
   ]) {
     final engine = ConfigEngine.inMemory(initialCache);
     final builder = ConfigBuilder(engine);
-    return factory(builder)..attachEngine(engine);
+    _pendingEngine = engine;
+    try {
+      return factory(builder)..attachEngine(engine);
+    } finally {
+      _pendingEngine = null;
+    }
   }
 
   /// Releases active timers, file watchers, and streams.
@@ -165,9 +198,22 @@ class Config {
   /// prevent data loss on fast application exit.
   void dispose() => _engine?.dispose();
 
-  /// Returns an unmodifiable snapshot map of all configuration entries in memory.
-  Map<String, dynamic> toFlatJson() => engine.toFlatJson();
+  /// Returns an unmodifiable snapshot map of configuration entries in memory for this scope.
+  Map<String, dynamic> toFlatJson() {
+    if (prefix.isEmpty) return engine.toFlatJson();
+    final scopedPrefix = '$prefix.';
+    final scoped = <String, dynamic>{};
+    for (final entry in engine.cache.entries) {
+      if (entry.key.startsWith(scopedPrefix)) {
+        scoped[entry.key.substring(scopedPrefix.length)] = entry.value;
+      }
+    }
+    return Map<String, dynamic>.unmodifiable(scoped);
+  }
 
-  /// Returns the nested unflattened JSON map as it would appear on disk.
-  Map<String, dynamic> toJson() => engine.toJson();
+  /// Returns the nested unflattened JSON map for this scope.
+  Map<String, dynamic> toJson() {
+    if (prefix.isEmpty) return engine.toJson();
+    return unflattenConfigMap(toFlatJson());
+  }
 }

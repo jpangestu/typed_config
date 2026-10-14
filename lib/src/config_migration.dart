@@ -4,6 +4,31 @@ import 'package:meta/meta.dart';
 @internal
 const String schemaVersionKey = 'schemaVersion';
 
+/// Removes any ancestor keys of [key] (e.g. `'a'` and `'a.b'` for `'a.b.c'`).
+@internal
+void removeKeyAncestors(Map<String, dynamic> map, String key) {
+  int dotIndex = key.indexOf('.');
+  while (dotIndex != -1) {
+    map.remove(key.substring(0, dotIndex));
+    dotIndex = key.indexOf('.', dotIndex + 1);
+  }
+}
+
+/// Removes any descendant keys of [key] (e.g. `'a.b.*'` for `'a.b'`).
+@internal
+bool removeKeyDescendants(Map<String, dynamic> map, String key) {
+  final prefix = '$key.';
+  var removed = false;
+  map.removeWhere((k, _) {
+    if (k.startsWith(prefix)) {
+      removed = true;
+      return true;
+    }
+    return false;
+  });
+  return removed;
+}
+
 /// Context passed to [ConfigMigrator] callbacks containing the current configuration
 /// state and migration utilities.
 ///
@@ -15,18 +40,32 @@ final class ConfigMigrationContext {
 
   ConfigMigrationContext(this.data);
 
-  /// Renames [oldKey] to [newKey], preserving its value.
+  /// Renames [oldKey] to [newKey], preserving its value or nested group entries.
   ///
-  /// If [oldKey] exists, its value is moved to [newKey] and [oldKey] is removed.
+  /// Works for both leaf entries and nested map prefixes (`oldKey.*` -> `newKey.*`).
   /// If [oldKey] does not exist, this does nothing.
-  ///
-  /// ```dart
-  /// // Move key to a new namespace:
-  /// m.rename('theme', 'ui.themeMode');
-  /// ```
   void rename(String oldKey, String newKey) {
-    if (data.containsKey(oldKey)) {
+    if (oldKey == newKey) return;
+
+    final oldPrefix = '$oldKey.';
+    final matchingSubKeys = data.keys.where((k) => k.startsWith(oldPrefix)).toList(growable: false);
+
+    final hasExact = data.containsKey(oldKey);
+    if (!hasExact && matchingSubKeys.isEmpty) return;
+
+    removeKeyAncestors(data, newKey);
+    data.remove(newKey);
+    removeKeyDescendants(data, newKey);
+
+    if (hasExact) {
       data[newKey] = data.remove(oldKey);
+    }
+
+    for (final k in matchingSubKeys) {
+      final suffix = k.substring(oldPrefix.length);
+      final targetKey = '$newKey.$suffix';
+      removeKeyAncestors(data, targetKey);
+      data[targetKey] = data.remove(k);
     }
   }
 
@@ -34,40 +73,38 @@ final class ConfigMigrationContext {
   ///
   /// If [key] exists and its stored value is of type [T], the value is replaced with
   /// whatever [updater] returns. If [key] is missing or not of type [T], this does nothing.
-  ///
-  /// The callback can return a different type, allowing in-flight type conversions:
-  /// ```dart
-  /// // Scale volume from 0..100 to 0.0..1.0:
-  /// m.transform<num>('volume', (current) => current / 100.0);
-  ///
-  /// // Convert String "enabled" to bool:
-  /// m.transform<String>('autoUpdate', (current) => current == 'enabled');
-  /// ```
   void transform<T>(String key, dynamic Function(T current) updater) {
     if (data.containsKey(key)) {
       final current = data[key];
       if (current is T) {
-        data[key] = updater(current);
+        this[key] = updater(current);
       }
     }
   }
 
   /// Removes all configuration entries whose keys start with [prefix].
   ///
-  /// Useful for dropping entire deprecated sections or nested groups:
-  /// ```dart
-  /// // Drops all keys starting with 'analytics.' (e.g. 'analytics.id', 'analytics.enabled'):
-  /// m.removePrefix('analytics.');
-  /// ```
+  /// If [prefix] ends with `'.'` (e.g. `'analytics.'`), also removes an exact key
+  /// match (`'analytics'`) if it was stored as an empty map `{}`.
   void removePrefix(String prefix) {
-    data.removeWhere((key, _) => key.startsWith(prefix));
+    if (prefix.isEmpty) return;
+    final bareKey = prefix.endsWith('.') ? prefix.substring(0, prefix.length - 1) : null;
+    data.removeWhere((key, value) {
+      if (key.startsWith(prefix)) return true;
+      if (bareKey != null && key == bareKey && value is Map) return true;
+      return false;
+    });
   }
 
   /// Returns the value associated with [key], or `null` if [key] is not present.
   dynamic operator [](String key) => data[key];
 
-  /// Whether the configuration data contains [key].
-  bool containsKey(String key) => data.containsKey(key);
+  /// Whether the configuration data contains [key] or any nested children under `[key].*`.
+  bool containsKey(String key) {
+    if (data.containsKey(key)) return true;
+    final prefix = '$key.';
+    return data.keys.any((k) => k.startsWith(prefix));
+  }
 
   /// An iterable of all configuration keys currently present.
   Iterable<String> get keys => data.keys;
@@ -75,27 +112,48 @@ final class ConfigMigrationContext {
   /// Associates [key] with the given [value].
   ///
   /// If [value] is a nested [Map], it is automatically flattened into dot-separated keys.
-  /// If [key] was already present, its previous value is replaced.
+  /// Cleans up any conflicting ancestor or descendant keys.
   void operator []=(String key, dynamic value) {
+    removeKeyAncestors(data, key);
+    data.remove(key);
+    removeKeyDescendants(data, key);
+
     if (value is Map) {
-      data.remove(key);
-      data.addAll(flattenConfigMap(value, key));
+      if (value.isEmpty) {
+        data[key] = const <String, dynamic>{};
+      } else {
+        data.addAll(flattenConfigMap(value, key));
+      }
     } else {
       data[key] = value;
     }
   }
 
-  /// Removes [key] and its associated value, if present, from the configuration data.
+  /// Removes [key] and any nested children under `[key].*` from the configuration data.
   ///
   /// Returns the value associated with [key] before it was removed, or
   /// `null` if [key] was not present.
-  dynamic remove(String key) => data.remove(key);
+  dynamic remove(String key) {
+    final direct = data.remove(key);
+    final prefix = '$key.';
+    Map<String, dynamic>? subFlat;
+    final toRemove = <String>[];
+    for (final entry in data.entries) {
+      if (entry.key.startsWith(prefix)) {
+        (subFlat ??= <String, dynamic>{})[entry.key.substring(prefix.length)] = entry.value;
+        toRemove.add(entry.key);
+      }
+    }
+    for (final k in toRemove) {
+      data.remove(k);
+    }
+    if (direct != null) return direct;
+    if (subFlat != null) return unflattenConfigMap(subFlat);
+    return null;
+  }
 }
 
 /// Function signature for migrating configuration data between schema versions.
-///
-/// The provided [m] context contains the flattened configuration state and
-/// helper methods to rename keys, transform types, or remove deprecated groups.
 typedef ConfigMigrator = void Function(ConfigMigrationContext m);
 
 /// Sequentially executes registered [migrations] to upgrade [data] from its
@@ -165,7 +223,7 @@ ConfigMigrationResult migrateConfigData({
         try {
           migrator(ConfigMigrationContext(workingData));
         } catch (e, s) {
-          onLog?.call('Migration to schema version v$v failed: $e');
+          onLog?.call('Migration to schema version v$v failed:$e');
           throw ConfigMigrationException(
             fromVersion: fromVersion,
             toVersion: targetVersion,
@@ -239,7 +297,7 @@ final class ConfigMigrationException implements Exception {
 
   @override
   String toString() =>
-      'ConfigMigrationException: Migration to schema version v$failedAtVersion failed (upgrading from v$fromVersion to v$toVersion): $cause';
+      'ConfigMigrationException: Migration to schema version v$failedAtVersion failed (upgrading from v$fromVersion to v$toVersion):$cause';
 }
 
 /// Safely extracts and normalizes the schema version from [value].
@@ -258,8 +316,15 @@ int parseSchemaVersion(dynamic value) {
 }
 
 /// Recursively flattens a nested map into a flat map with dot-separated keys.
+///
+/// Throws [ArgumentError] if any nested map key is empty or contains `'.'` when
+/// [validateKeys] is `true`.
 @internal
-Map<String, dynamic> flattenConfigMap(Map<dynamic, dynamic> nested, [String prefix = '']) {
+Map<String, dynamic> flattenConfigMap(
+  Map<dynamic, dynamic> nested, [
+  String prefix = '',
+  bool validateKeys = false,
+]) {
   if (nested.isEmpty) {
     return prefix.isEmpty
         ? <String, dynamic>{}
@@ -271,6 +336,13 @@ Map<String, dynamic> flattenConfigMap(Map<dynamic, dynamic> nested, [String pref
   void flatten(Map<dynamic, dynamic> map, String p) {
     for (final entry in map.entries) {
       final key = entry.key.toString();
+      if (validateKeys && (key.isEmpty || key.contains('.'))) {
+        throw ArgumentError.value(
+          key,
+          'key',
+          'Map keys stored in Config cannot be empty or contain ".".',
+        );
+      }
       final fullKey = p.isEmpty ? key : '$p.$key';
       final val = entry.value;
       if (val is Map && val.isNotEmpty) {

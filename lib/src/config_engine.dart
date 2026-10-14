@@ -74,14 +74,6 @@ final class ConfigEngine {
     }
   }
 
-  void _removeAncestors(String key) {
-    int dotIndex = key.indexOf('.');
-    while (dotIndex != -1) {
-      cache.remove(key.substring(0, dotIndex));
-      dotIndex = key.indexOf('.', dotIndex + 1);
-    }
-  }
-
   bool containsKey(String key) {
     if (cache.containsKey(key)) return true;
     final prefix = '$key.';
@@ -89,7 +81,7 @@ final class ConfigEngine {
   }
 
   dynamic readRaw(String key) {
-    // Fast O(1) path for all primitives, enums, lists, and empty maps
+    // Fast O(1) path for all primitives, enums, lists, explicit nulls, and empty maps
     if (cache.containsKey(key)) return cache[key];
 
     // Reconstruct nested map if 'key.*' entries exist
@@ -114,7 +106,7 @@ final class ConfigEngine {
     if (value is Map) {
       final incomingFlat = value.isEmpty
           ? <String, dynamic>{key: const <String, dynamic>{}}
-          : flattenConfigMap(value, key);
+          : flattenConfigMap(value, key, true);
 
       // Check if the current state for this key/prefix already matches incomingFlat
       final currentFlat = <String, dynamic>{
@@ -125,9 +117,9 @@ final class ConfigEngine {
 
       if (_mapEquality.equals(currentFlat, incomingFlat)) return;
 
-      _removeAncestors(key);
+      removeKeyAncestors(cache, key);
       cache.remove(key);
-      cache.removeWhere((k, _) => k.startsWith(prefix));
+      removeKeyDescendants(cache, key);
       cache.addAll(incomingFlat);
 
       _changeVersion++;
@@ -146,8 +138,8 @@ final class ConfigEngine {
       return;
     }
 
-    _removeAncestors(key);
-    cache.removeWhere((k, _) => k.startsWith(prefix));
+    removeKeyAncestors(cache, key);
+    removeKeyDescendants(cache, key);
     cache[key] = serialized;
     _changeVersion++;
     isDirty = true;
@@ -157,15 +149,10 @@ final class ConfigEngine {
 
   void resetKey(String key) {
     if (_isDisposed) return;
-    final prefix = '$key.';
     bool removed = cache.remove(key) != null;
-    cache.removeWhere((k, _) {
-      if (k.startsWith(prefix)) {
-        removed = true;
-        return true;
-      }
-      return false;
-    });
+    if (removeKeyDescendants(cache, key)) {
+      removed = true;
+    }
     if (!removed) return;
 
     _changeVersion++;
@@ -224,25 +211,23 @@ final class ConfigEngine {
 
     () async {
       final writeVersion = _changeVersion;
+      File? tempFile;
       try {
         final flatMap = Map<String, dynamic>.from(cache);
         final nestedMap = unflattenConfigMap(flatMap);
-        final jsonString = JsonEncoder.withIndent(
-          '  ',
-          (o) => o.toString(),
-        ).convert(nestedMap);
+        final jsonString = const JsonEncoder.withIndent('  ').convert(nestedMap);
 
         if (!targetFile.parent.existsSync()) {
           targetFile.parent.createSync(recursive: true);
         }
 
-        final tempFile = File('${targetFile.path}.${pid}_${_writeNonce++}.tmp');
+        tempFile = File('${targetFile.path}.${pid}_${_writeNonce++}.tmp');
         _ignoreWatcherUntil = DateTime.now().add(const Duration(seconds: 2));
         await tempFile.writeAsString(jsonString, flush: true);
 
         if (_isDisposed) {
           try {
-            await tempFile.delete();
+            if (tempFile.existsSync()) await tempFile.delete();
           } catch (_) {}
           completer.complete();
           return;
@@ -251,6 +236,13 @@ final class ConfigEngine {
         try {
           await tempFile.rename(targetFile.path);
         } on FileSystemException {
+          if (_isDisposed) {
+            try {
+              if (tempFile.existsSync()) await tempFile.delete();
+            } catch (_) {}
+            completer.complete();
+            return;
+          }
           // Fallback for Windows lock contention
           await tempFile.copy(targetFile.path);
           try {
@@ -267,6 +259,11 @@ final class ConfigEngine {
         log('Successfully written to disk.');
         completer.complete();
       } catch (e, s) {
+        if (tempFile != null) {
+          try {
+            if (tempFile.existsSync()) await tempFile.delete();
+          } catch (_) {}
+        }
         logError('Failed to write config to disk', e, s);
         completer.completeError(e, s);
       } finally {
@@ -274,7 +271,11 @@ final class ConfigEngine {
         if (_nextWrite != null) {
           final next = _nextWrite!;
           _nextWrite = null;
-          flush().then(next.complete, onError: next.completeError);
+          if (_isDisposed) {
+            next.complete();
+          } else {
+            flush().then(next.complete, onError: next.completeError);
+          }
         }
       }
     }();
@@ -323,8 +324,16 @@ final class ConfigEngine {
     final targetFile = file;
     if (targetFile == null || !targetFile.existsSync() || _isDisposed) return;
 
+    final startChangeVersion = _changeVersion;
+
     try {
       final content = await targetFile.readAsString();
+
+      // Abort if state was modified in memory, a write started, or engine was disposed while reading
+      if (_isDisposed || isDirty || _changeVersion != startChangeVersion || _currentWrite != null) {
+        return;
+      }
+
       final decoded = jsonDecode(content);
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('Config JSON is not an object');
@@ -428,7 +437,8 @@ final class ConfigEngine {
           );
         }
       } catch (e, s) {
-        await quarantineFile(configFile, logger);
+        final suffix = e is ConfigMigrationException ? 'v${e.fromVersion}.corrupt' : 'corrupt';
+        await quarantineFile(configFile, logger, suffix: suffix);
         cache = <String, dynamic>{schemaVersionKey: schemaVersion};
         isDirty = true;
         if (onError != null) {
@@ -461,15 +471,17 @@ final class ConfigEngine {
 
   static Future<void> quarantineFile(
     File file,
-    void Function(String message)? log,
-  ) async {
+    void Function(String message)? log, {
+    String suffix = 'corrupt',
+  }) async {
     if (!file.existsSync()) return;
     try {
-      final corruptFile = File('${file.path}.corrupt');
+      var corruptFile = File('${file.path}.$suffix');
       if (corruptFile.existsSync()) {
-        try {
-          await corruptFile.delete();
-        } catch (_) {}
+        // Preserve previous quarantined file if one already exists
+        corruptFile = File(
+          '${file.path}.${DateTime.now().millisecondsSinceEpoch}.$suffix',
+        );
       }
       try {
         await file.rename(corruptFile.path);
@@ -496,16 +508,14 @@ final class ConfigEngine {
     if (shouldWrite) {
       final targetFile = file;
       if (targetFile != null) {
+        File? tempFile;
         try {
           if (!targetFile.parent.existsSync()) {
             targetFile.parent.createSync(recursive: true);
           }
-          final jsonStr = JsonEncoder.withIndent(
-            '  ',
-            (o) => o.toString(),
-          ).convert(unflattenConfigMap(cache));
+          final jsonStr = const JsonEncoder.withIndent('  ').convert(unflattenConfigMap(cache));
 
-          final tempFile = File(
+          tempFile = File(
             '${targetFile.path}.${pid}_${_writeNonce++}.tmp',
           );
           tempFile.writeAsStringSync(jsonStr, flush: true);
@@ -521,6 +531,11 @@ final class ConfigEngine {
           isDirty = false;
           log('Synchronously written to disk on dispose.');
         } catch (e, s) {
+          if (tempFile != null) {
+            try {
+              if (tempFile.existsSync()) tempFile.deleteSync();
+            } catch (_) {}
+          }
           logError('Failed to write config on dispose', e, s);
         }
       }

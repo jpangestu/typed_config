@@ -1,6 +1,9 @@
+import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
 
 import 'config_engine.dart';
+
+const DeepCollectionEquality _entryDeepEquality = DeepCollectionEquality();
 
 /// A strongly-typed configuration entry handle.
 ///
@@ -35,7 +38,12 @@ final class ConfigEntry<T> {
   /// Falls back to [defaultValue] if the entry is not explicitly set in the cache.
   T get value {
     final raw = _engine.readRaw(key);
-    if (raw == null) return defaultValue;
+    if (raw == null) {
+      if (null is T && _engine.containsKey(key)) {
+        return null as T;
+      }
+      return defaultValue;
+    }
     return parse(raw);
   }
 
@@ -54,16 +62,23 @@ final class ConfigEntry<T> {
 
   /// Broadcast stream that emits the latest typed value whenever this entry changes.
   ///
-  /// Ignores changes to unrelated entries.
-  Stream<T> get changes => _engine.watchKey(key).map((_) => value);
+  /// Ignores changes to unrelated entries and deduplicates identical consecutive values.
+  Stream<T> get changes =>
+      _engine.watchKey(key).map((_) => value).distinct(_entryDeepEquality.equals);
 
   /// Parses raw JSON into [T], safely falling back to [defaultValue].
   T parse(dynamic json) {
-    if (json == null) return defaultValue;
+    if (json == null) {
+      if (null is T && _engine.containsKey(key)) {
+        return null as T;
+      }
+      return defaultValue;
+    }
     if (fromJson != null) {
       try {
         return fromJson!(json);
-      } catch (_) {
+      } catch (e, s) {
+        _engine.logError('Failed to parse key "$key"', e, s);
         return defaultValue;
       }
     }
@@ -81,10 +96,13 @@ final class ConfigEntry<T> {
 
   /// Serializes [val] into a JSON-encodable format.
   dynamic serialize(T val) {
+    if (val == null && null is T) return null;
     if (toJson != null) {
       try {
         return toJson!(val);
-      } catch (_) {
+      } catch (e, s) {
+        _engine.logError('Failed to serialize key "$key"', e, s);
+        if (defaultValue == null && null is T) return null;
         return toJson!(defaultValue);
       }
     }
