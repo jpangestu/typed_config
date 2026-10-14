@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
 
@@ -22,6 +24,10 @@ final class ConfigEntry<T> {
   final T defaultValue;
 
   final ConfigEngine _engine;
+
+  /// Reference to the backing [ConfigEngine].
+  @internal
+  ConfigEngine get engine => _engine;
 
   /// Optional deserializer to convert raw JSON into [T].
   final T Function(dynamic json)? fromJson;
@@ -72,25 +78,15 @@ final class ConfigEntry<T> {
 
   /// Updates this setting in memory immediately and schedules a debounced disk save.
   ///
-  /// If custom serialization via [toJson] fails, logs the error and preserves the
-  /// previous stored value without overwriting it.
+  /// If custom serialization via [toJson] or map key validation fails, logs the error
+  /// and preserves the previous stored value without overwriting it.
   set value(T newValue) {
-    if (newValue == null && null is T) {
-      _engine.writeRaw(key, null);
-      return;
-    }
-    if (toJson != null) {
-      final dynamic encoded;
-      try {
-        encoded = toJson!(newValue);
-      } catch (e, s) {
-        _engine.logError('Failed to serialize key "$key"', e, s);
-        return;
-      }
+    try {
+      final encoded = serialize(newValue);
       _engine.writeRaw(key, encoded);
-      return;
+    } catch (e, s) {
+      _engine.logError('Failed to serialize key "$key"', e, s);
     }
-    _engine.writeRaw(key, newValue);
   }
 
   /// Reverts this setting back to [defaultValue] and schedules a disk save.
@@ -103,9 +99,30 @@ final class ConfigEntry<T> {
 
   /// Broadcast stream that emits the latest typed value whenever this entry changes.
   ///
-  /// Ignores changes to unrelated entries and deduplicates identical consecutive values.
-  Stream<T> get changes =>
-      _engine.watchKey(key).map((_) => value).distinct(_entryDeepEquality.equals);
+  /// Ignores changes to unrelated entries, coalesces multi-key batch notifications
+  /// within the same engine version, and deduplicates identical consecutive values.
+  Stream<T> get changes => Stream<T>.multi(
+        (controller) {
+          int? lastVersion;
+          final sub = _engine
+              .watchKey(key)
+              .where((_) {
+                final currentVersion = _engine.changeVersion;
+                if (lastVersion == currentVersion) return false;
+                lastVersion = currentVersion;
+                return true;
+              })
+              .map((_) => value)
+              .distinct(_entryDeepEquality.equals)
+              .listen(
+                controller.add,
+                onError: controller.addError,
+                onDone: controller.close,
+              );
+          controller.onCancel = sub.cancel;
+        },
+        isBroadcast: true,
+      );
 
   /// Parses raw JSON into [T], safely falling back to [defaultValue].
   T parse(dynamic json) {
@@ -136,20 +153,11 @@ final class ConfigEntry<T> {
   }
 
   /// Serializes [val] into a JSON-encodable format.
+  @internal
   dynamic serialize(T val) {
     if (val == null && null is T) return null;
     if (toJson != null) {
-      try {
-        return toJson!(val);
-      } catch (e, s) {
-        _engine.logError('Failed to serialize key "$key"', e, s);
-        if (defaultValue == null && null is T) return null;
-        try {
-          return toJson!(defaultValue);
-        } catch (_) {
-          return null;
-        }
-      }
+      return toJson!(val);
     }
     return val;
   }

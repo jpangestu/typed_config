@@ -1,8 +1,25 @@
+import 'dart:collection' show UnmodifiableMapView;
+
 import 'package:meta/meta.dart';
 
 /// Key used in JSON storage to track the current configuration schema version.
 @internal
 const String schemaVersionKey = 'schemaVersion';
+
+/// Recursively wraps [value] if it is a [List] or [Map] so cached values cannot be mutated in place.
+@internal
+dynamic freezeConfigValue(dynamic value) {
+  if (value is List) {
+    return List<dynamic>.unmodifiable(value.map(freezeConfigValue));
+  }
+  if (value is Map) {
+    if (value.isEmpty) return const <String, dynamic>{};
+    return Map<String, dynamic>.unmodifiable({
+      for (final entry in value.entries) entry.key.toString(): freezeConfigValue(entry.value),
+    });
+  }
+  return value;
+}
 
 /// Removes any ancestor keys of [key] (e.g. `'a'` and `'a.b'` for `'a.b.c'`).
 @internal
@@ -111,19 +128,24 @@ final class ConfigMigrationContext {
     }
   }
 
-  /// Removes all configuration entries whose keys start with [prefix].
+  /// Removes all configuration entries under the segment prefix [prefix].
   ///
-  /// If [prefix] ends with `'.'` (e.g. `'analytics.'`), also removes an exact key
-  /// match (`'analytics'`) if it was stored as an empty map `{}`.
+  /// Matches keys strictly on dot-delimited segment boundaries (`'prefix.*'` and `'prefix'`).
+  /// If [prefix] ends with `'.'` (e.g. `'analytics.'`), an exact match on `'analytics'`
+  /// is only removed if it was stored as an empty map `{}`.
   void removePrefix(String prefix) {
     if (prefix.isEmpty) return;
     final bareKey = prefix.endsWith('.') ? prefix.substring(0, prefix.length - 1) : prefix;
-    if (bareKey == schemaVersionKey) return;
+    if (bareKey.isEmpty ||
+        bareKey == schemaVersionKey ||
+        bareKey.startsWith('$schemaVersionKey.')) {
+      return;
+    }
     final dotPrefix = '$bareKey.';
     _data.removeWhere((key, value) {
       if (key.startsWith(dotPrefix)) return true;
-      if (prefix.endsWith('.') ? (key == bareKey && value is Map) : key.startsWith(prefix)) {
-        return key != schemaVersionKey;
+      if (key == bareKey) {
+        return prefix.endsWith('.') ? value is Map : true;
       }
       return false;
     });
@@ -172,10 +194,8 @@ final class ConfigMigrationContext {
       } else {
         _data.addAll(flattenConfigMap(value, key, true));
       }
-    } else if (value is List) {
-      _data[key] = List<dynamic>.unmodifiable(value);
     } else {
-      _data[key] = value;
+      _data[key] = freezeConfigValue(value);
     }
   }
 
@@ -388,7 +408,8 @@ Map<String, dynamic> flattenConfigMap(
   void flatten(Map<dynamic, dynamic> map, String p) {
     for (final entry in map.entries) {
       final key = entry.key.toString();
-      if (validateKeys && (key.isEmpty || key.contains('.'))) {
+      if (validateKeys &&
+          (key.isEmpty || key.startsWith('.') || key.endsWith('.') || key.contains('.'))) {
         throw ArgumentError.value(
           key,
           'key',
@@ -418,7 +439,7 @@ Map<String, dynamic> flattenConfigMap(
         if (val is Map) {
           result[fullKey] = const <String, dynamic>{};
         } else {
-          result[fullKey] = val;
+          result[fullKey] = freezeConfigValue(val);
         }
       }
     }
@@ -428,7 +449,20 @@ Map<String, dynamic> flattenConfigMap(
   return result;
 }
 
-/// Recursively un-flattens a flat map with dot-separated keys into a nested map structure.
+Map<String, dynamic> _freezeNestedMap(Map<String, dynamic> map) {
+  if (map.isEmpty) return const <String, dynamic>{};
+  for (final key in map.keys.toList(growable: false)) {
+    final val = map[key];
+    if (val is Map<String, dynamic>) {
+      map[key] = _freezeNestedMap(val);
+    } else {
+      map[key] = freezeConfigValue(val);
+    }
+  }
+  return Map<String, dynamic>.unmodifiable(map);
+}
+
+/// Recursively un-flattens a flat map with dot-separated keys into an unmodifiable nested map structure.
 @internal
 Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
   final result = <String, dynamic>{};
@@ -442,7 +476,9 @@ Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
     if (entry.key == schemaVersionKey) continue;
     final key = entry.key;
     final rawValue = entry.value;
-    final value = (rawValue is Map && rawValue.isEmpty) ? <String, dynamic>{} : rawValue;
+    final value = (rawValue is Map && rawValue.isEmpty)
+        ? const <String, dynamic>{}
+        : freezeConfigValue(rawValue);
 
     if (!key.contains('.')) {
       result[key] = value;
@@ -454,7 +490,7 @@ Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
     for (int i = 0; i < segments.length - 1; i++) {
       final seg = segments[i];
       final existing = current[seg];
-      if (existing is Map<String, dynamic>) {
+      if (existing is Map<String, dynamic> && existing is! UnmodifiableMapView) {
         current = existing;
       } else {
         final newMap = <String, dynamic>{};
@@ -464,5 +500,5 @@ Map<String, dynamic> unflattenConfigMap(Map<String, dynamic> flat) {
     }
     current[segments.last] = value;
   }
-  return result;
+  return _freezeNestedMap(result);
 }

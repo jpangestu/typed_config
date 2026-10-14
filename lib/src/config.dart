@@ -12,7 +12,23 @@ import 'config_migration.dart' show ConfigMigrator, unflattenConfigMap;
 /// Base class for strongly-typed application configurations.
 ///
 /// Subclass [Config] using a constructor that accepts [ConfigBuilder] and
-/// forwards it to `super(builder)`:
+/// forwards it to `super(builder)`.
+///
+/// Entries can be initialized eagerly in the constructor initializer list
+/// (which validates keys immediately at startup):
+///
+/// ```dart
+/// class AppConfig extends Config {
+///   AppConfig(super.builder)
+///       : theme = builder.define('theme', 'system'),
+///         volume = builder.define('volume', 0.8);
+///
+///   final ConfigEntry<String> theme;
+///   final ConfigEntry<double> volume;
+/// }
+/// ```
+///
+/// Or declared concisely using `late final`:
 ///
 /// ```dart
 /// class AppConfig extends Config {
@@ -60,12 +76,12 @@ class Config {
   final String prefix;
 
   /// The builder for declaring configuration entries within this group's namespace.
-  ConfigBuilder get builder => ConfigBuilder(_engine, prefix);
+  final ConfigBuilder builder;
 
-  /// Creates a [Config] instance bound to [initialBuilder]'s engine and prefix.
-  Config(ConfigBuilder initialBuilder)
-      : _engine = initialBuilder.engine,
-        prefix = initialBuilder.prefix;
+  /// Creates a [Config] instance bound to [builder]'s engine and prefix.
+  Config(this.builder)
+      : _engine = builder.engine,
+        prefix = builder.prefix;
 
   String _scopedKey(String key) {
     if (prefix.isEmpty) return key;
@@ -91,8 +107,14 @@ class Config {
   // Direct Key Access & Overrides
   // ==============================================================================================
 
-  /// Whether [entry] has an explicitly stored value in the cache.
-  bool contains<T>(ConfigEntry<T> entry) => _engine.containsKey(entry.key);
+  /// Whether [entry] belongs to this configuration scope and has an explicitly stored value.
+  bool contains<T>(ConfigEntry<T> entry) {
+    if (!identical(entry.engine, _engine)) return false;
+    if (prefix.isNotEmpty && entry.key != prefix && !entry.key.startsWith('$prefix.')) {
+      return false;
+    }
+    return _engine.containsKey(entry.key);
+  }
 
   /// Synchronously returns raw stored value for [key] (scoped to [prefix] if non-empty).
   dynamic readRaw(String key) => _engine.readRaw(_scopedKey(key));

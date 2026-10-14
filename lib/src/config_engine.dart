@@ -35,6 +35,7 @@ final class ConfigEngine {
   DateTime? _ignoreWatcherUntil;
   int _writeNonce = 0;
   int _changeVersion = 0;
+  int _disposedWriteVersion = -1;
   bool _isDisposed = false;
   bool isDirty = false;
 
@@ -132,10 +133,7 @@ final class ConfigEngine {
       return;
     }
 
-    dynamic serialized = value;
-    if (serialized is List) {
-      serialized = List<dynamic>.unmodifiable(serialized);
-    }
+    final dynamic serialized = freezeConfigValue(value);
 
     if (cache.containsKey(key) && _deepEquality.equals(cache[key], serialized)) {
       return;
@@ -203,7 +201,7 @@ final class ConfigEngine {
   Future<void> _deleteTempQuietly(File? tempFile) async {
     if (tempFile == null) return;
     try {
-      if (tempFile.existsSync()) await tempFile.delete();
+      if (await tempFile.exists()) await tempFile.delete();
     } catch (_) {}
   }
 
@@ -232,18 +230,26 @@ final class ConfigEngine {
         final nestedMap = unflattenConfigMap(flatMap);
         final jsonString = const JsonEncoder.withIndent('  ').convert(nestedMap);
 
-        if (!targetFile.parent.existsSync()) {
-          targetFile.parent.createSync(recursive: true);
+        if (!await targetFile.parent.exists()) {
+          await targetFile.parent.create(recursive: true);
+        }
+
+        if (_isDisposed) {
+          completer.complete();
+          return;
         }
 
         tempFile = File('${targetFile.path}.${pid}_${_writeNonce++}.tmp');
         _ignoreWatcherUntil = DateTime.now().add(const Duration(seconds: 2));
         await tempFile.writeAsString(jsonString, flush: true);
 
-        // If dispose() ran while writing tempFile, dispose() already wrote the latest
-        // state synchronously. Abort before touching targetFile.
-        if (_isDisposed) {
+        // If dispose() ran or a newer write occurred while writing tempFile, abort before
+        // touching targetFile so we never overwrite newer state.
+        if (_isDisposed || _changeVersion != writeVersion) {
           await _deleteTempQuietly(tempFile);
+          if (!_isDisposed && _changeVersion != writeVersion) {
+            _nextWrite ??= Completer<void>();
+          }
           completer.complete();
           return;
         }
@@ -251,14 +257,27 @@ final class ConfigEngine {
         try {
           await tempFile.rename(targetFile.path);
         } on FileSystemException {
-          if (_isDisposed) {
+          if (_isDisposed || _changeVersion != writeVersion) {
             await _deleteTempQuietly(tempFile);
+            if (!_isDisposed && _changeVersion != writeVersion) {
+              _nextWrite ??= Completer<void>();
+            }
             completer.complete();
             return;
           }
           // Fallback for Windows lock contention
           await tempFile.copy(targetFile.path);
           await _deleteTempQuietly(tempFile);
+        }
+
+        // If dispose() ran concurrently while the async rename/copy was in-flight in the OS
+        // thread pool and wrote a newer version, re-apply the synchronous dispose write.
+        if (_isDisposed) {
+          if (_disposedWriteVersion > writeVersion) {
+            _writeSync(targetFile);
+          }
+          completer.complete();
+          return;
         }
 
         _ignoreWatcherUntil = DateTime.now().add(
@@ -329,7 +348,7 @@ final class ConfigEngine {
 
   Future<void> reloadFromDisk() async {
     final targetFile = file;
-    if (targetFile == null || !targetFile.existsSync() || _isDisposed) return;
+    if (targetFile == null || _isDisposed || !await targetFile.exists()) return;
 
     final startChangeVersion = _changeVersion;
 
@@ -417,7 +436,7 @@ final class ConfigEngine {
     Map<String, dynamic> cache;
     bool isDirty = false;
 
-    if (!configFile.existsSync()) {
+    if (!await configFile.exists()) {
       cache = <String, dynamic>{schemaVersionKey: schemaVersion};
       isDirty = true;
     } else {
@@ -481,10 +500,10 @@ final class ConfigEngine {
     void Function(String message)? log, {
     String suffix = 'corrupt',
   }) async {
-    if (!file.existsSync()) return;
+    if (!await file.exists()) return;
     try {
       var corruptFile = File('${file.path}.$suffix');
-      if (corruptFile.existsSync()) {
+      if (await corruptFile.exists()) {
         // Preserve previous quarantined file if one already exists
         corruptFile = File(
           '${file.path}.${DateTime.now().millisecondsSinceEpoch}.$suffix',
@@ -505,6 +524,40 @@ final class ConfigEngine {
     }
   }
 
+  void _writeSync(File targetFile) {
+    File? tempFile;
+    try {
+      if (!targetFile.parent.existsSync()) {
+        targetFile.parent.createSync(recursive: true);
+      }
+      final jsonStr = const JsonEncoder.withIndent('  ').convert(unflattenConfigMap(cache));
+
+      tempFile = File(
+        '${targetFile.path}.${pid}_${_writeNonce++}.tmp',
+      );
+      tempFile.writeAsStringSync(jsonStr, flush: true);
+
+      try {
+        tempFile.renameSync(targetFile.path);
+      } on FileSystemException {
+        tempFile.copySync(targetFile.path);
+        try {
+          tempFile.deleteSync();
+        } catch (_) {}
+      }
+      _disposedWriteVersion = _changeVersion;
+      isDirty = false;
+      log('Synchronously written to disk on dispose.');
+    } catch (e, s) {
+      if (tempFile != null) {
+        try {
+          if (tempFile.existsSync()) tempFile.deleteSync();
+        } catch (_) {}
+      }
+      logError('Failed to write config on dispose', e, s);
+    }
+  }
+
   void dispose() {
     if (_isDisposed) return;
     _isDisposed = true;
@@ -515,36 +568,7 @@ final class ConfigEngine {
     if (shouldWrite) {
       final targetFile = file;
       if (targetFile != null) {
-        File? tempFile;
-        try {
-          if (!targetFile.parent.existsSync()) {
-            targetFile.parent.createSync(recursive: true);
-          }
-          final jsonStr = const JsonEncoder.withIndent('  ').convert(unflattenConfigMap(cache));
-
-          tempFile = File(
-            '${targetFile.path}.${pid}_${_writeNonce++}.tmp',
-          );
-          tempFile.writeAsStringSync(jsonStr, flush: true);
-
-          try {
-            tempFile.renameSync(targetFile.path);
-          } on FileSystemException {
-            tempFile.copySync(targetFile.path);
-            try {
-              tempFile.deleteSync();
-            } catch (_) {}
-          }
-          isDirty = false;
-          log('Synchronously written to disk on dispose.');
-        } catch (e, s) {
-          if (tempFile != null) {
-            try {
-              if (tempFile.existsSync()) tempFile.deleteSync();
-            } catch (_) {}
-          }
-          logError('Failed to write config on dispose', e, s);
-        }
+        _writeSync(targetFile);
       }
     }
     _watcherDebounceTimer?.cancel();
