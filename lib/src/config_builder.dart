@@ -5,10 +5,19 @@ import 'config_engine.dart';
 import 'config_entry.dart';
 import 'config_migration.dart';
 
-Type _typeOf<X>() => X;
+bool _isRawCollectionType<T>(T defaultValue) {
+  if (defaultValue is List || defaultValue is Map) return true;
+  final typeStr = T.toString();
+  return T == List || T == Map || typeStr.startsWith('List<') || typeStr.startsWith('Map<');
+}
 
-final Type _nullableDoubleType = _typeOf<double?>();
-final Type _nullableIntType = _typeOf<int?>();
+T _freezeTypedElement<T>(T element) {
+  if (element is List || element is Map) {
+    final frozen = freezeConfigValue(element);
+    if (frozen is T) return frozen;
+  }
+  return element;
+}
 
 /// A configuration construction context passed to class constructors.
 ///
@@ -26,44 +35,19 @@ final class ConfigBuilder {
   @internal
   ConfigBuilder(this.engine, [this.prefix = '']);
 
-  static void _validateSegment(String segment, String paramName) {
-    if (segment.isEmpty ||
-        segment.startsWith('.') ||
-        segment.endsWith('.') ||
-        segment.contains('..')) {
-      throw ArgumentError.value(
-        segment,
-        paramName,
-        'Key segment must be non-empty and cannot start/end with "." or contain "..".',
-      );
-    }
-  }
-
   String _resolveKey(String key) {
-    _validateSegment(key, 'key');
+    validateKeySegment(key, 'key');
     final fullKey = prefix.isEmpty ? key : '$prefix.$key';
-    if (fullKey == schemaVersionKey || fullKey.startsWith('$schemaVersionKey.')) {
-      throw ArgumentError.value(
-        fullKey,
-        'key',
-        '"$schemaVersionKey" is reserved for internal schema tracking.',
-      );
-    }
+    validateConfigKey(fullKey, 'key');
     engine.registerKey(fullKey);
     return fullKey;
   }
 
   /// Creates a scoped child builder with an added namespace prefix (e.g. `withPrefix('audio')` -> `'audio'`).
   ConfigBuilder withPrefix(String name) {
-    _validateSegment(name, 'name');
+    validateKeySegment(name, 'name');
     final childPrefix = prefix.isEmpty ? name : '$prefix.$name';
-    if (childPrefix == schemaVersionKey || childPrefix.startsWith('$schemaVersionKey.')) {
-      throw ArgumentError.value(
-        childPrefix,
-        'name',
-        '"$schemaVersionKey" is reserved for internal schema tracking.',
-      );
-    }
+    validateConfigKey(childPrefix, 'name');
     engine.registerGroup(childPrefix);
     return ConfigBuilder(engine, childPrefix);
   }
@@ -74,12 +58,22 @@ final class ConfigBuilder {
   }
 
   /// Defines a strongly-typed configuration entry.
+  ///
+  /// For `List` or `Map` entries without custom `fromJson`/`toJson` converters,
+  /// use [defineList] or [defineMap] instead.
   ConfigEntry<T> define<T>(
     String key,
     T defaultValue, {
     T Function(dynamic json)? fromJson,
     dynamic Function(T value)? toJson,
   }) {
+    if (fromJson == null && _isRawCollectionType<T>(defaultValue)) {
+      throw ArgumentError.value(
+        key,
+        'key',
+        'Use defineList() or defineMap() (or provide custom fromJson/toJson) for collection type $T.',
+      );
+    }
     final fullKey = _resolveKey(key);
     return ConfigEntry<T>(
       key: fullKey,
@@ -106,6 +100,7 @@ final class ConfigBuilder {
       engine: engine,
       fromJson: (j) => j is String ? (lookup[j] ?? defaultValue) : defaultValue,
       toJson: (e) => e.name,
+      isFlatLeaf: true,
     );
   }
 
@@ -119,14 +114,17 @@ final class ConfigBuilder {
     dynamic Function(T value)? itemToJson,
   }) {
     final fullKey = _resolveKey(key);
-    final unmodifiableDefault = List<T>.unmodifiable(defaultValue);
-    final isDoubleElem = T == double || T == _nullableDoubleType;
-    final isIntElem = T == int || T == _nullableIntType;
+    final unmodifiableDefault = List<T>.unmodifiable(
+      defaultValue.map(_freezeTypedElement<T>),
+    );
+    final isDoubleElem = T == double || T == nullableDoubleType;
+    final isIntElem = T == int || T == nullableIntType;
 
     return ConfigEntry<List<T>>(
       key: fullKey,
       defaultValue: unmodifiableDefault,
       engine: engine,
+      isFlatLeaf: true,
       fromJson: (json) {
         if (json is! List) return unmodifiableDefault;
         try {
@@ -141,7 +139,7 @@ final class ConfigBuilder {
             } else if (isIntElem && item is num) {
               parsed.add(item.toInt() as T);
             } else if (item is T) {
-              parsed.add(item);
+              parsed.add(_freezeTypedElement<T>(item));
             } else {
               throw FormatException(
                 'Invalid list element "${item.runtimeType}" for List<$T> in key "$fullKey".',
@@ -158,13 +156,15 @@ final class ConfigBuilder {
           ? (val) => List<dynamic>.unmodifiable(
                 val.map((e) => (e == null && null is T) ? null : itemToJson(e)),
               )
-          : (val) => List<T>.unmodifiable(val),
+          : (val) => List<T>.unmodifiable(val.map(_freezeTypedElement<T>)),
     );
   }
 
   /// Defines a strongly-typed map configuration entry (`Map<String, V>`), defensively
   /// wrapped in unmodifiable views.
   ///
+  /// Because maps are flattened into dot-separated keys in storage, map keys in
+  /// [defaultValue] and runtime values must be non-empty and cannot contain `'.'`.
   /// Optionally accepts [valueFromJson] and [valueToJson] for custom value types.
   ConfigEntry<Map<String, V>> defineMap<V>(
     String key,
@@ -172,15 +172,27 @@ final class ConfigBuilder {
     V Function(dynamic json)? valueFromJson,
     dynamic Function(V value)? valueToJson,
   }) {
+    for (final k in defaultValue.keys) {
+      if (k.isEmpty || k.contains('.')) {
+        throw ArgumentError.value(
+          k,
+          'defaultValue',
+          'Map keys stored in Config cannot be empty or contain ".".',
+        );
+      }
+    }
     final fullKey = _resolveKey(key);
-    final unmodifiableDefault = Map<String, V>.unmodifiable(defaultValue);
-    final isDoubleVal = V == double || V == _nullableDoubleType;
-    final isIntVal = V == int || V == _nullableIntType;
+    final unmodifiableDefault = Map<String, V>.unmodifiable({
+      for (final entry in defaultValue.entries) entry.key: _freezeTypedElement<V>(entry.value),
+    });
+    final isDoubleVal = V == double || V == nullableDoubleType;
+    final isIntVal = V == int || V == nullableIntType;
 
     return ConfigEntry<Map<String, V>>(
       key: fullKey,
       defaultValue: unmodifiableDefault,
       engine: engine,
+      isFlatLeaf: false,
       fromJson: (json) {
         if (json is! Map) return unmodifiableDefault;
         try {
@@ -197,7 +209,7 @@ final class ConfigBuilder {
             } else if (isIntVal && val is num) {
               parsed[k] = val.toInt() as V;
             } else if (val is V) {
-              parsed[k] = val;
+              parsed[k] = _freezeTypedElement<V>(val);
             } else {
               throw FormatException(
                 'Invalid map value "${val.runtimeType}" for Map<String, $V> at "$fullKey.$k".',
@@ -215,7 +227,9 @@ final class ConfigBuilder {
                 for (final e in val.entries)
                   e.key: (e.value == null && null is V) ? null : valueToJson(e.value),
               })
-          : (val) => Map<String, V>.unmodifiable(val),
+          : (val) => Map<String, V>.unmodifiable({
+                for (final e in val.entries) e.key: _freezeTypedElement<V>(e.value),
+              }),
     );
   }
 }

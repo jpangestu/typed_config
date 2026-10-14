@@ -7,7 +7,7 @@ import 'config_builder.dart';
 import 'config_engine.dart';
 import 'config_entry.dart';
 import 'config_migration.dart' as migration;
-import 'config_migration.dart' show ConfigMigrator, unflattenConfigMap;
+import 'config_migration.dart' show ConfigMigrator, unflattenConfigMap, validateKeySegment;
 
 /// Base class for strongly-typed application configurations.
 ///
@@ -15,7 +15,7 @@ import 'config_migration.dart' show ConfigMigrator, unflattenConfigMap;
 /// forwards it to `super(builder)`.
 ///
 /// Entries can be initialized eagerly in the constructor initializer list
-/// (which validates keys immediately at startup):
+/// (which validates keys and detects prefix collisions immediately at startup):
 ///
 /// ```dart
 /// class AppConfig extends Config {
@@ -28,7 +28,8 @@ import 'config_migration.dart' show ConfigMigrator, unflattenConfigMap;
 /// }
 /// ```
 ///
-/// Or declared concisely using `late final`:
+/// Or declared concisely using `late final` (note that `late final` defers key
+/// registration and collision validation until the field is first accessed):
 ///
 /// ```dart
 /// class AppConfig extends Config {
@@ -120,10 +121,16 @@ class Config {
   dynamic readRaw(String key) => _engine.readRaw(_scopedKey(key));
 
   /// Stores [value] for [key] (scoped to [prefix] if non-empty) in memory and schedules a debounced save to disk.
-  void writeRaw(String key, dynamic value) => _engine.writeRaw(_scopedKey(key), value);
+  void writeRaw(String key, dynamic value) {
+    validateKeySegment(key, 'key');
+    _engine.writeRaw(_scopedKey(key), value);
+  }
 
   /// Removes [key] (scoped to [prefix] if non-empty) from the cache and schedules saving to disk.
-  void resetKey(String key) => _engine.resetKey(_scopedKey(key));
+  void resetKey(String key) {
+    validateKeySegment(key, 'key');
+    _engine.resetKey(_scopedKey(key));
+  }
 
   /// Clears all configuration overrides in this scope, reverts entries to defaults,
   /// and flushes to disk immediately.
@@ -194,7 +201,11 @@ class Config {
     final instance = factory(ConfigBuilder(engine));
 
     if (engine.isDirty) {
-      await instance.flush();
+      try {
+        await instance.flush();
+      } catch (_) {
+        // Error is already logged and routed to onError inside flush().
+      }
     }
     instance.startWatcher();
     return instance;

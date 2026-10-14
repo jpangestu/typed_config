@@ -4,12 +4,79 @@ import 'package:meta/meta.dart';
 
 Type _typeOf<X>() => X;
 
-final Type _nullableDoubleType = _typeOf<double?>();
-final Type _nullableIntType = _typeOf<int?>();
+/// Shared runtime type representation for `double?`.
+@internal
+final Type nullableDoubleType = _typeOf<double?>();
+
+/// Shared runtime type representation for `int?`.
+@internal
+final Type nullableIntType = _typeOf<int?>();
+
+final Type _nullableBoolType = _typeOf<bool?>();
+final Type _nullableNumType = _typeOf<num?>();
+final Type _nullableStringType = _typeOf<String?>();
+
+/// Returns whether [T] is a scalar primitive type that is never stored as a nested map.
+@internal
+bool isPrimitiveFlatLeafType<T>() =>
+    T == int ||
+    T == nullableIntType ||
+    T == double ||
+    T == nullableDoubleType ||
+    T == num ||
+    T == _nullableNumType ||
+    T == bool ||
+    T == _nullableBoolType ||
+    T == String ||
+    T == _nullableStringType;
 
 /// Key used in JSON storage to track the current configuration schema version.
 @internal
 const String schemaVersionKey = 'schemaVersion';
+
+/// Validates a single relative or full key segment.
+@internal
+void validateKeySegment(String segment, [String paramName = 'key']) {
+  if (segment.isEmpty ||
+      segment.startsWith('.') ||
+      segment.endsWith('.') ||
+      segment.contains('..')) {
+    throw ArgumentError.value(
+      segment,
+      paramName,
+      'Key segment must be non-empty and cannot start/end with "." or contain "..".',
+    );
+  }
+}
+
+/// Validates a full configuration key, ensuring it is well-formed and does not
+/// collide with the reserved [schemaVersionKey].
+@internal
+void validateConfigKey(String key, [String paramName = 'key']) {
+  validateKeySegment(key, paramName);
+  if (key == schemaVersionKey || key.startsWith('$schemaVersionKey.')) {
+    throw ArgumentError.value(
+      key,
+      paramName,
+      '"$schemaVersionKey" is reserved for internal schema tracking.',
+    );
+  }
+}
+
+/// Validates registered schema [migrations] version numbers upfront.
+@internal
+void validateMigrations(Map<int, ConfigMigrator>? migrations) {
+  if (migrations == null) return;
+  for (final v in migrations.keys) {
+    if (v <= 1) {
+      throw ArgumentError.value(
+        v,
+        'migrations',
+        'Migration registered for schema version v$v, but migrations start at v2.',
+      );
+    }
+  }
+}
 
 /// Recursively wraps [value] if it is a [List] or [Map] so cached values cannot be mutated in place.
 @internal
@@ -64,31 +131,14 @@ final class ConfigMigrationContext {
 
   ConfigMigrationContext(this._data);
 
-  static void _validateMigrationKey(String key, String paramName) {
-    if (key.isEmpty || key.startsWith('.') || key.endsWith('.') || key.contains('..')) {
-      throw ArgumentError.value(
-        key,
-        paramName,
-        'Migration key must be non-empty and cannot start/end with "." or contain "..".',
-      );
-    }
-    if (key == schemaVersionKey || key.startsWith('$schemaVersionKey.')) {
-      throw ArgumentError.value(
-        key,
-        paramName,
-        '"$schemaVersionKey" is reserved for internal schema tracking.',
-      );
-    }
-  }
-
   /// Renames [oldKey] to [newKey], preserving its value or nested group entries.
   ///
   /// Works for both leaf entries and nested map prefixes (`oldKey.*` -> `newKey.*`),
   /// including nesting (`'theme'` -> `'theme.mode'`) and unnesting (`'theme.mode'` -> `'theme'`).
   /// If [oldKey] does not exist, this does nothing.
   void rename(String oldKey, String newKey) {
-    _validateMigrationKey(oldKey, 'oldKey');
-    _validateMigrationKey(newKey, 'newKey');
+    validateConfigKey(oldKey, 'oldKey');
+    validateConfigKey(newKey, 'newKey');
     if (oldKey == newKey) return;
 
     final oldPrefix = '$oldKey.';
@@ -126,11 +176,11 @@ final class ConfigMigrationContext {
   /// (including numeric coercion between `int` and `double`), the value is replaced with
   /// whatever [updater] returns.
   void transform<T>(String key, dynamic Function(T current) updater) {
-    if (!containsKey(key)) return;
     final current = this[key];
-    if ((T == double || T == _nullableDoubleType) && current is num) {
+    if (current == null && !_data.containsKey(key)) return;
+    if ((T == double || T == nullableDoubleType) && current is num) {
       this[key] = updater(current.toDouble() as T);
-    } else if ((T == int || T == _nullableIntType) && current is num) {
+    } else if ((T == int || T == nullableIntType) && current is num) {
       this[key] = updater(current.toInt() as T);
     } else if (current is T) {
       this[key] = updater(current);
@@ -184,15 +234,18 @@ final class ConfigMigrationContext {
     return _data.keys.any((k) => k.startsWith(prefix));
   }
 
-  /// An iterable of all configuration keys currently present.
-  Iterable<String> get keys => _data.keys;
+  /// An unmodifiable snapshot of all user configuration keys currently present
+  /// (excluding the internal [schemaVersionKey]).
+  Iterable<String> get keys => List<String>.unmodifiable(
+        _data.keys.where((k) => k != schemaVersionKey),
+      );
 
   /// Associates [key] with the given [value].
   ///
   /// If [value] is a nested [Map], it is automatically flattened into dot-separated keys.
   /// Cleans up any conflicting ancestor or descendant keys.
   void operator []=(String key, dynamic value) {
-    _validateMigrationKey(key, 'key');
+    validateConfigKey(key, 'key');
     removeKeyAncestors(_data, key);
     _data.remove(key);
     removeKeyDescendants(_data, key);
@@ -213,7 +266,7 @@ final class ConfigMigrationContext {
   /// Returns the value associated with [key] before it was removed, or
   /// `null` if [key] was not present.
   dynamic remove(String key) {
-    _validateMigrationKey(key, 'key');
+    validateConfigKey(key, 'key');
     final direct = _data.remove(key);
     final prefix = '$key.';
     Map<String, dynamic>? subFlat;
@@ -239,7 +292,7 @@ typedef ConfigMigrator = void Function(ConfigMigrationContext m);
 /// Sequentially executes registered [migrations] to upgrade [data] from its
 /// detected file version up to [targetVersion].
 ///
-/// Throws [ArgumentError] if [targetVersion] is less than 1.
+/// Throws [ArgumentError] if [targetVersion] is less than 1 or any migration key is `<= 1`.
 /// Throws [ConfigMigrationException] if any migration step throws an error.
 @internal
 ConfigMigrationResult migrateConfigData({
@@ -256,19 +309,10 @@ ConfigMigrationResult migrateConfigData({
     );
   }
 
-  if (migrations != null) {
-    for (final v in migrations.keys) {
-      if (v <= 1) {
-        throw ArgumentError.value(
-          v,
-          'migrations',
-          'Migration registered for schema version v$v, but migrations start at v2.',
-        );
-      }
-    }
-  }
+  validateMigrations(migrations);
 
-  final fromVersion = parseSchemaVersion(data[schemaVersionKey]);
+  final rawVersion = data[schemaVersionKey];
+  final fromVersion = parseSchemaVersion(rawVersion);
 
   // Case 1: Newer version on disk
   if (fromVersion > targetVersion) {
@@ -283,8 +327,8 @@ ConfigMigrationResult migrateConfigData({
     );
   }
 
-  // Case 2: Hot path: already up-to-date with schemaVersion pinned
-  if (fromVersion == targetVersion && data.containsKey(schemaVersionKey)) {
+  // Case 2: Hot path: already up-to-date with exact integer schemaVersion pinned
+  if (fromVersion == targetVersion && rawVersion is int && rawVersion == targetVersion) {
     return ConfigMigrationResult(
       data: data,
       fromVersion: fromVersion,
@@ -293,7 +337,7 @@ ConfigMigrationResult migrateConfigData({
     );
   }
 
-  // Case 3: Migration sequence required: work on a defensive mutable copy
+  // Case 3: Migration sequence or version normalization required: work on a defensive mutable copy
   final workingData = Map<String, dynamic>.from(data);
 
   if (fromVersion < targetVersion && migrations != null) {
@@ -417,8 +461,7 @@ Map<String, dynamic> flattenConfigMap(
   void flatten(Map<dynamic, dynamic> map, String p) {
     for (final entry in map.entries) {
       final key = entry.key.toString();
-      if (validateKeys &&
-          (key.isEmpty || key.startsWith('.') || key.endsWith('.') || key.contains('.'))) {
+      if (validateKeys && (key.isEmpty || key.contains('.'))) {
         throw ArgumentError.value(
           key,
           'key',

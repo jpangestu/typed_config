@@ -24,6 +24,7 @@ final class ConfigEngine {
   final Map<int, ConfigMigrator>? migrations;
   final Map<String, dynamic> cache;
   final StreamController<String> keyChanges;
+  final StreamController<String> _syncKeyChanges = StreamController<String>.broadcast(sync: true);
   final void Function(String message)? onLog;
   final void Function(Object error, StackTrace stackTrace)? onError;
 
@@ -40,6 +41,7 @@ final class ConfigEngine {
   int _changeVersion = 0;
   int _disposedWriteVersion = -1;
   bool _isDisposed = false;
+  bool _lastFlushFailed = false;
   bool isDirty = false;
 
   bool get isDisposed => _isDisposed;
@@ -144,8 +146,13 @@ final class ConfigEngine {
   }
 
   void _notifyKey(String key) {
-    if (!_isDisposed && !keyChanges.isClosed) {
-      keyChanges.add(key);
+    if (!_isDisposed) {
+      if (!_syncKeyChanges.isClosed) {
+        _syncKeyChanges.add(key);
+      }
+      if (!keyChanges.isClosed) {
+        keyChanges.add(key);
+      }
     }
   }
 
@@ -175,6 +182,7 @@ final class ConfigEngine {
 
   void writeRaw(String key, dynamic value) {
     if (_isDisposed) return;
+    validateConfigKey(key, 'key');
 
     final prefix = '$key.';
 
@@ -199,6 +207,7 @@ final class ConfigEngine {
 
       _changeVersion++;
       isDirty = true;
+      _lastFlushFailed = false;
       _notifyKey(key);
       _scheduleSave();
       return;
@@ -215,12 +224,15 @@ final class ConfigEngine {
     cache[key] = serialized;
     _changeVersion++;
     isDirty = true;
+    _lastFlushFailed = false;
     _notifyKey(key);
     _scheduleSave();
   }
 
   void resetKey(String key, {bool scheduleSave = true}) {
     if (_isDisposed) return;
+    validateConfigKey(key, 'key');
+
     bool removed = cache.remove(key) != null;
     if (removeKeyDescendants(cache, key)) {
       removed = true;
@@ -229,6 +241,7 @@ final class ConfigEngine {
 
     _changeVersion++;
     isDirty = true;
+    _lastFlushFailed = false;
     _notifyKey(key);
     if (scheduleSave) {
       _scheduleSave();
@@ -244,19 +257,33 @@ final class ConfigEngine {
     }
     _changeVersion++;
     isDirty = true;
+    _lastFlushFailed = false;
     _notifyKey('*');
     await flush();
   }
+
+  static bool _keyMatchesWatchTarget(String changedKey, String targetKey, String targetPrefix) =>
+      changedKey == targetKey ||
+      changedKey == '*' ||
+      changedKey.startsWith(targetPrefix) ||
+      targetKey.startsWith('$changedKey.');
 
   Stream<String> watchKey(String key) {
     if (key == '*') return keyChanges.stream;
     final prefix = '$key.';
     return keyChanges.stream.where(
-      (changedKey) =>
-          changedKey == key ||
-          changedKey == '*' ||
-          changedKey.startsWith(prefix) ||
-          key.startsWith('$changedKey.'),
+      (changedKey) => _keyMatchesWatchTarget(changedKey, key, prefix),
+    );
+  }
+
+  /// Synchronous internal key-change stream used by [ConfigEntry.changes] to
+  /// snapshot values at the exact point of mutation before scheduling async delivery.
+  @internal
+  Stream<String> watchKeySync(String key) {
+    if (key == '*') return _syncKeyChanges.stream;
+    final prefix = '$key.';
+    return _syncKeyChanges.stream.where(
+      (changedKey) => _keyMatchesWatchTarget(changedKey, key, prefix),
     );
   }
 
@@ -359,6 +386,7 @@ final class ConfigEngine {
           _ignoreWatcherUntil = DateTime.now().add(
             const Duration(milliseconds: 250),
           );
+          _lastFlushFailed = false;
           if (_changeVersion == writeVersion) {
             isDirty = false;
           }
@@ -369,6 +397,8 @@ final class ConfigEngine {
           completer.complete();
         }
       } catch (e, s) {
+        _lastFlushFailed = true;
+        _ignoreWatcherUntil = null;
         await _deleteTempQuietly(tempFile);
         logError('Failed to write config to disk', e, s);
         if (!completer.isCompleted) {
@@ -391,8 +421,12 @@ final class ConfigEngine {
     return completer.future;
   }
 
+  bool get _HasPendingUnflushedChanges => isDirty && !_lastFlushFailed;
+
   bool get _shouldIgnoreWatcherEvent {
-    if (_isDisposed || _currentWrite != null || isDirty) return true;
+    if (_isDisposed || _currentWrite != null || _HasPendingUnflushedChanges) {
+      return true;
+    }
     if (_debounceTimer?.isActive ?? false) return true;
     final ignoreUntil = _ignoreWatcherUntil;
     if (ignoreUntil != null && DateTime.now().isBefore(ignoreUntil)) {
@@ -455,7 +489,10 @@ final class ConfigEngine {
       final content = await targetFile.readAsString();
 
       // Abort if state was modified in memory, a write started, or engine was disposed while reading
-      if (_isDisposed || isDirty || _changeVersion != startChangeVersion || _currentWrite != null) {
+      if (_isDisposed ||
+          _HasPendingUnflushedChanges ||
+          _changeVersion != startChangeVersion ||
+          _currentWrite != null) {
         return;
       }
 
@@ -476,6 +513,7 @@ final class ConfigEngine {
       if (_mapEquality.equals(cache, newCache)) {
         if (migrationResult.didMigrate) {
           isDirty = true;
+          _lastFlushFailed = false;
           _scheduleSave();
         }
         return;
@@ -496,6 +534,7 @@ final class ConfigEngine {
       cache.clear();
       cache.addAll(newCache);
       _changeVersion++;
+      _lastFlushFailed = false;
 
       if (migrationResult.didMigrate) {
         isDirty = true;
@@ -529,6 +568,7 @@ final class ConfigEngine {
         'Schema version must be at least 1.',
       );
     }
+    validateMigrations(migrations);
 
     final logger = onLog ?? (_kDebugMode ? (String msg) => print('[Config] $msg') : null);
 
@@ -647,6 +687,7 @@ final class ConfigEngine {
       }
       _disposedWriteVersion = _changeVersion;
       isDirty = false;
+      _lastFlushFailed = false;
       log('Synchronously written to disk on dispose.');
     } catch (e, s) {
       if (tempFile != null) {
@@ -673,6 +714,7 @@ final class ConfigEngine {
     }
     _watcherDebounceTimer?.cancel();
     _fileWatcherSubscription?.cancel();
+    _syncKeyChanges.close();
     keyChanges.close();
   }
 

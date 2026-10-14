@@ -4,14 +4,10 @@ import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
 
 import 'config_engine.dart';
-import 'config_migration.dart' show freezeConfigValue;
+import 'config_migration.dart'
+    show freezeConfigValue, isPrimitiveFlatLeafType, nullableDoubleType, nullableIntType;
 
 const DeepCollectionEquality _entryDeepEquality = DeepCollectionEquality();
-
-Type _typeOf<X>() => X;
-
-final Type _nullableDoubleType = _typeOf<double?>();
-final Type _nullableIntType = _typeOf<int?>();
 
 T _freezeDefault<T>(T value) {
   if (value is List || value is Map) {
@@ -34,6 +30,10 @@ final class ConfigEntry<T> {
 
   final ConfigEngine _engine;
 
+  /// Whether this entry is guaranteed to be stored only as a direct key in
+  /// `engine.cache` (never as flattened `key.*` map entries).
+  final bool _isFlatLeaf;
+
   /// Reference to the backing [ConfigEngine].
   @internal
   ConfigEngine get engine => _engine;
@@ -54,8 +54,10 @@ final class ConfigEntry<T> {
     required ConfigEngine engine,
     this.fromJson,
     this.toJson,
+    bool? isFlatLeaf,
   })  : defaultValue = _freezeDefault<T>(defaultValue),
-        _engine = engine;
+        _engine = engine,
+        _isFlatLeaf = isFlatLeaf ?? (fromJson == null && isPrimitiveFlatLeafType<T>());
 
   /// Synchronously returns the typed value from memory in O(1) time.
   ///
@@ -78,6 +80,9 @@ final class ConfigEntry<T> {
         return (null is T) ? null as T : defaultValue;
       }
       return parse(raw);
+    }
+    if (_isFlatLeaf) {
+      return defaultValue;
     }
     final raw = _engine.readRaw(key);
     if (raw == null) {
@@ -110,26 +115,50 @@ final class ConfigEntry<T> {
   /// Broadcast stream that emits the latest typed value whenever this entry changes.
   ///
   /// Ignores changes to unrelated entries, coalesces multi-key batch notifications
-  /// within the same engine version, and deduplicates identical consecutive values.
+  /// within the same engine version, captures rapid synchronous mutations in order,
+  /// and deduplicates identical consecutive values against the initial baseline at listen time.
   Stream<T> get changes => Stream<T>.multi(
         (controller) {
-          int? lastVersion;
-          final sub = _engine
-              .watchKey(key)
-              .where((_) {
-                final currentVersion = _engine.changeVersion;
-                if (lastVersion == currentVersion) return false;
-                lastVersion = currentVersion;
-                return true;
-              })
-              .map((_) => value)
-              .distinct(_entryDeepEquality.equals)
-              .listen(
-                controller.add,
-                onError: controller.addError,
-                onDone: controller.close,
-              );
-          controller.onCancel = sub.cancel;
+          int lastVersion = _engine.changeVersion;
+          T lastValue = value;
+          bool isCanceled = false;
+
+          final sub = _engine.watchKeySync(key).listen(
+            (_) {
+              final currentVersion = _engine.changeVersion;
+              if (lastVersion == currentVersion) return;
+              lastVersion = currentVersion;
+
+              final currentValue = value;
+              if (_entryDeepEquality.equals(lastValue, currentValue)) return;
+              lastValue = currentValue;
+
+              scheduleMicrotask(() {
+                if (!isCanceled && !controller.isClosed) {
+                  controller.add(currentValue);
+                }
+              });
+            },
+            onError: (Object e, StackTrace s) {
+              scheduleMicrotask(() {
+                if (!isCanceled && !controller.isClosed) {
+                  controller.addError(e, s);
+                }
+              });
+            },
+            onDone: () {
+              scheduleMicrotask(() {
+                if (!isCanceled && !controller.isClosed) {
+                  controller.close();
+                }
+              });
+            },
+          );
+
+          controller.onCancel = () {
+            isCanceled = true;
+            return sub.cancel();
+          };
         },
         isBroadcast: true,
       );
@@ -151,11 +180,11 @@ final class ConfigEntry<T> {
       }
     }
     // Handle JSON num-to-double coercion (including nullable double?)
-    if ((T == double || T == _nullableDoubleType) && json is num) {
+    if ((T == double || T == nullableDoubleType) && json is num) {
       return json.toDouble() as T;
     }
     // Handle JSON num-to-int coercion (including nullable int?)
-    if ((T == int || T == _nullableIntType) && json is num) {
+    if ((T == int || T == nullableIntType) && json is num) {
       return json.toInt() as T;
     }
     if (json is T) return json;
