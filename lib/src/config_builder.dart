@@ -7,7 +7,7 @@ import 'package:typed_config/src/config_engine.dart';
 ///
 /// Used during application setup to declare strongly-typed [ConfigEntry] instances
 /// and organized domain-driven [group]s with automatic key path prefixing.
-class ConfigBuilder({
+final class ConfigBuilder({
   @internal required final ConfigEngine engine,
   required final List<String> prefixPath,
 }) {
@@ -87,7 +87,7 @@ class ConfigBuilder({
         if (itemFromJson != null) {
           return json.map(itemFromJson).toList();
         }
-        return json.cast<T>();
+        return json.cast<T>().toList();
       },
       toJson: itemToJson != null ? (list) => list.map(itemToJson).toList() : null,
     );
@@ -120,8 +120,18 @@ final class ConfigEntry<T>({
   T get value {
     final keyValue = _engine.read(keyPath);
     if (keyValue == null) return defaultValue;
-    if (fromJson != null) return fromJson!(keyValue);
-    return keyValue as T;
+    if (fromJson != null) {
+      try {
+        return fromJson!(keyValue);
+      } catch (_) {
+        return defaultValue;
+      }
+    }
+    if (keyValue is T) return keyValue;
+    if (T == double && keyValue is num) {
+      return keyValue.toDouble() as T;
+    }
+    return defaultValue;
   }
 
   set value(T newValue) {
@@ -136,17 +146,18 @@ final class ConfigEntry<T>({
   String get key => keyPath.join('.');
 
   /// Whether this entry has been explicitly modified.
-  bool get isModified => _engine.read(keyPath) != null;
+  bool get isModified => _engine.containsKey(keyPath);
 
   /// A broadcast stream that emits whenever this entry's value changes.
   ///
-  /// Emits the new [value] each time this setting is modified or [reset].
-  /// Consecutive duplicate values are ignored.
+  /// Emits the new [value] each time this setting is modified, [reset], or affected
+  /// by a parent group modification. Consecutive duplicate values are ignored using
+  /// deep collection equality.
   ///
   /// Note: Only emits subsequent changes; does not emit the current value
   /// upon initial subscription.
   Stream<T> get changes =>
-      _engine.watchKey(key).map((_) => value).distinct(const DeepCollectionEquality().equals);
+      _engine.watchKey(keyPath).map((_) => value).distinct(const DeepCollectionEquality().equals);
 
   @override
   String toString() => 'ConfigEntry<$T>($key: $value)';

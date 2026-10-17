@@ -3,6 +3,7 @@ import 'dart:io' show File;
 
 import 'package:typed_config/src/config_builder.dart';
 import 'package:typed_config/src/config_engine.dart';
+import 'package:typed_config/src/config_migrator.dart';
 
 /// Base class for strongly-typed application configuration schemas.
 ///
@@ -14,12 +15,11 @@ import 'package:typed_config/src/config_engine.dart';
 ///   final audio = builder.group('audio', AudioConfig.new);
 /// }
 /// ```
-class Config {
+class Config(
   /// The builder context used to define entries and groups for this config.
-  final ConfigBuilder builder;
-
-  /// Creates a configuration instance bound to [builder].
-  Config(this.builder);
+  final ConfigBuilder builder,
+) {
+  static const String schemaVersionKey = 'schemaVersion';
 
   /// Loads configuration from [configFile], falling back to defaults if missing.
   ///
@@ -36,14 +36,17 @@ class Config {
   static Future<T> initialize<T extends Config>({
     required File configFile,
     required T Function(ConfigBuilder builder) create,
+    int schemaVersion = 1,
+    Map<int, MigrationHandler>? migrations,
     Duration? debounceDuration,
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) async {
     var inMemoryCache = <String, dynamic>{};
+    final fileExisted = await configFile.exists();
 
     // Load configs from configFile to inMemoryCache
-    if (await configFile.exists()) {
+    if (fileExisted) {
       try {
         final rawJson = await configFile.readAsString();
         final decodedJson = jsonDecode(rawJson);
@@ -70,6 +73,18 @@ class Config {
       onError: onError,
     );
 
+    _runMigrations(
+      engine: engine,
+      schemaVersion: schemaVersion,
+      migrations: migrations,
+      isFirstSetup: !fileExisted || inMemoryCache.isEmpty,
+      onLog: onLog,
+      onError: onError,
+    );
+
+    // Make sure migrations is saved to disk
+    await engine.flush();
+
     final builder = ConfigBuilder(engine: engine, prefixPath: const []);
 
     return create.call(builder);
@@ -82,11 +97,17 @@ class Config {
   /// final testConfig = Config.inMemory(
   ///   create: AppConfig.new,
   ///   initialData: {'volume': 0.5},
+  ///   schemaVersion: 2,
+  ///   migrations: {
+  ///     2: (m) => m.rename(['volume'], ['audio', 'volume']),
+  ///   },
   /// );
   /// ```
   static T inMemory<T extends Config>({
     required T Function(ConfigBuilder builder) create,
     Map<String, dynamic>? initialData,
+    int schemaVersion = 1,
+    Map<int, MigrationHandler>? migrations,
     Duration? debounceDuration,
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
@@ -94,7 +115,7 @@ class Config {
     // Copy to prevent outside callers from modifying the map directly (which would bypass change
     // listeners and writing to disk) and to ensure the map is mutable if const was passed.
     final inMemoryCache = initialData != null
-        ? Map<String, dynamic>.of(initialData)
+        ? jsonDecode(jsonEncode(initialData)) as Map<String, dynamic>
         : <String, dynamic>{};
     onLog?.call('[typed_config] Initialized in-memory configuration.');
 
@@ -105,9 +126,60 @@ class Config {
       onError: onError,
     );
 
+    _runMigrations(
+      engine: engine,
+      schemaVersion: schemaVersion,
+      migrations: migrations,
+      isFirstSetup: initialData == null,
+      onLog: onLog,
+      onError: onError,
+    );
+
     final builder = ConfigBuilder(engine: engine, prefixPath: const []);
 
     return create.call(builder);
+  }
+
+  static void _runMigrations({
+    required ConfigEngine engine,
+    required int schemaVersion,
+    required Map<int, MigrationHandler>? migrations,
+    bool isFirstSetup = false,
+    void Function(String message)? onLog,
+    void Function(Object error, StackTrace stackTrace)? onError,
+  }) {
+    if (isFirstSetup) {
+      engine.write([schemaVersionKey], schemaVersion);
+      return; // Exit. Migration is not needed
+    }
+
+    final currentSchemaVersion = (engine.read([schemaVersionKey]) as num?)?.toInt() ?? 1;
+
+    if (currentSchemaVersion < schemaVersion) {
+      for (int i = currentSchemaVersion + 1; i <= schemaVersion; i++) {
+        final migrator = migrations?[i];
+        if (migrator != null) {
+          try {
+            migrator.call(ConfigMigrator(configEngine: engine, fromVersion: i - 1, toVersion: i));
+            onLog?.call('[typed_config] Migrated config schema from v${i - 1} to v$i.');
+          } catch (e, s) {
+            onLog?.call('[typed_config] Migration from v${i - 1} to v$i failed: $e');
+            onError?.call(e, s);
+            rethrow;
+          }
+        }
+
+        engine.write([schemaVersionKey], i);
+      }
+    } else if (currentSchemaVersion > schemaVersion) {
+      onLog?.call(
+        '[typed_config] Config schema version ($currentSchemaVersion) is newer than current version ($schemaVersion).',
+      );
+    }
+
+    if (engine.read([schemaVersionKey]) == null) {
+      engine.write([schemaVersionKey], schemaVersion);
+    }
   }
 
   /// Immediately persists all pending in-memory configuration changes to disk.
@@ -116,8 +188,13 @@ class Config {
   }
 
   /// Clears all stored in-memory configuration overrides and immediately saves to disk.
+  /// Preserve schema version.
   Future<void> resetAll() async {
+    final version = builder.engine.read([schemaVersionKey]);
     builder.engine.resetAll();
+    if (version != null) {
+      builder.engine.write([schemaVersionKey], version);
+    }
     await flush();
   }
 

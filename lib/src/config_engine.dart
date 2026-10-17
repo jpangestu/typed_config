@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File, FileSystemException;
 
-class ConfigEngine({
+final class ConfigEngine({
   final File? _storedConfigFile,
   required final Map<String, dynamic> _inMemoryCache,
   Duration? debounceDuration,
@@ -11,8 +11,9 @@ class ConfigEngine({
 }) {
   final Duration debounceDuration = debounceDuration ?? const Duration(milliseconds: 300);
   bool _isCacheNeedsSave = false;
+  bool _isFlushing = false;
   Timer? _debouncedTimer;
-  final StreamController<String> _changeController = StreamController.broadcast();
+  final StreamController<List<String>> _changeController = StreamController.broadcast();
 
   // Add typed_config for each log
   void _log(String message) {
@@ -44,6 +45,10 @@ class ConfigEngine({
 
       if (next is Map<String, dynamic>) {
         currentCache = next;
+      } else if (next is Map) {
+        final converted = Map<String, dynamic>.from(next);
+        currentCache[segmentKey] = converted;
+        currentCache = converted;
       } else {
         // If missing or not a map, create a fresh map.
         final newMap = <String, dynamic>{};
@@ -55,7 +60,9 @@ class ConfigEngine({
     currentCache[keyPath.last] = value;
 
     _isCacheNeedsSave = true;
-    _changeController.add(keyPath.join('.'));
+    if (_changeController.isClosed == false) {
+      _changeController.add(keyPath);
+    }
     _debouncedSave();
   }
 
@@ -73,7 +80,9 @@ class ConfigEngine({
       currentCache.remove(keyPath.last);
 
       _isCacheNeedsSave = true;
-      _changeController.add(keyPath.join('.'));
+      if (_changeController.isClosed == false) {
+        _changeController.add(keyPath);
+      }
       _debouncedSave();
     }
   }
@@ -82,15 +91,47 @@ class ConfigEngine({
   void resetAll() {
     _inMemoryCache.clear();
     _isCacheNeedsSave = true;
-    _changeController.add('*');
+    if (_changeController.isClosed == false) {
+      _changeController.add(const []);
+    }
     _debouncedSave();
   }
 
-  Stream<String> watchKey(String key) {
-    return _changeController.stream.where(
-      (changedKey) => changedKey == key || changedKey == '*',
-    );
+  /// Returns whether a configuration entry exists at [keyPath].
+  bool containsKey(List<String> keyPath) {
+    if (keyPath.isEmpty) return false;
+
+    dynamic currentCache = raw;
+
+    for (int i = 0; i < keyPath.length - 1; i++) {
+      if (currentCache is! Map) return false;
+      currentCache = currentCache[keyPath[i]];
+    }
+
+    return currentCache is Map && currentCache.containsKey(keyPath.last);
   }
+
+  /// Returns a broadcast stream that emits change events affecting [keyPath].
+  ///
+  /// Emits the `changedPath` whenever:
+  /// - An exact match occurs (the entry at [keyPath] itself was modified or removed).
+  /// - A parent group path is overwritten or removed (e.g. writing `['audio']` when watching
+  ///   `['audio', 'volume']`).
+  /// - All settings were cleared via [resetAll] (emitting an empty list `const []`).
+  Stream<List<String>> watchKey(List<String> keyPath) {
+    return _changeController.stream.where((changedPath) {
+      if (changedPath.isEmpty) return true;
+      if (changedPath.length > keyPath.length) return false;
+
+      for (int i = 0; i < changedPath.length; i++) {
+        if (keyPath[i] != changedPath[i]) return false;
+      }
+      return true;
+    });
+  }
+
+  /// Raw copy of in-memory cache
+  Map<String, dynamic> get raw => _inMemoryCache;
 
   void _debouncedSave() {
     if (_storedConfigFile == null) return;
@@ -104,8 +145,9 @@ class ConfigEngine({
   /// Cancels any active debounce timer and (atomic) writes in-memory cache
   /// Does nothing if running in-memory or if there are no unsaved changes.
   Future<void> flush() async {
-    if (_storedConfigFile == null || !_isCacheNeedsSave) return;
+    if (_storedConfigFile == null || _isCacheNeedsSave == false || _isFlushing) return;
     _debouncedTimer?.cancel();
+    _isFlushing = true;
 
     File tempConfig = File('${_storedConfigFile.path}.tmp');
 
@@ -133,6 +175,8 @@ class ConfigEngine({
         if (await tempConfig.exists()) await tempConfig.delete();
       } catch (_) {}
       onError?.call(e, s);
+    } finally {
+      _isFlushing = false;
     }
   }
 

@@ -7,6 +7,7 @@
 - **Entry utilities**: Added `entry.isModified`, `entry.reset()`, `entry.resetAll()`, and reactive `entry.changes` broadcast stream.
 - **Specialized builders**: Added `builder.defineEnum()` and `builder.defineList()` with automatic serialization.
 - **In-memory testing**: Added `Config.inMemory(create: ...)` for instant unit testing without disk I/O.
+- **Schema migrations**: Added `ConfigMigrator` and `MigrationHandler` with path helpers (`rename`, `transform`, `read`, `write`, `remove`, `containsKey`, `raw`) for sequential version upgrades in `Config.initialize` and `Config.inMemory`.
 
 ## 0.1.0
 
