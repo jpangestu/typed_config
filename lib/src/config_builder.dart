@@ -60,13 +60,13 @@ final class ConfigBuilder({
   ///
   /// For primitive lists (e.g. `String`, `int`, `double`), no converters are needed:
   /// ```dart
-  /// late final tags = builder.defineList('tags', ['home', 'work']);
+  /// final tags = builder.defineList('tags', ['home', 'work']);
   /// ```
   ///
   /// For lists of custom objects, provide [itemFromJson] and [itemToJson]
   /// to convert each individual element:
   /// ```dart
-  /// late final users = builder.defineList<User>(
+  /// final users = builder.defineList<User>(
   ///   'users',
   ///   [],
   ///   itemFromJson: User.fromJson,

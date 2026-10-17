@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io' show File;
+import 'dart:io' show File, FileSystemException;
 
 import 'package:typed_config/src/config_builder.dart';
 import 'package:typed_config/src/config_engine.dart';
@@ -56,9 +56,15 @@ class Config(
           onLog?.call('[typed_config] Loaded configuration from ${configFile.path}');
         } else {
           onLog?.call('[typed_config] File content is not a JSON object. Starting with defaults.');
+          await _quarantineFile(configFile, onLog: onLog, onError: onError);
+          onError?.call(
+            const FormatException('Config file content is not a JSON object.'),
+            StackTrace.current,
+          );
         }
       } catch (e, s) {
         onLog?.call('[typed_config] Failed to read ${configFile.path}. Starting with defaults.');
+        await _quarantineFile(configFile, onLog: onLog, onError: onError);
         onError?.call(e, s);
       }
     } else {
@@ -138,6 +144,51 @@ class Config(
     final builder = ConfigBuilder(engine: engine, prefixPath: const []);
 
     return create.call(builder);
+  }
+
+  static Future<void> _quarantineFile(
+    File file, {
+    void Function(String message)? onLog,
+    void Function(Object error, StackTrace stackTrace)? onError,
+  }) async {
+    if (!await file.exists()) return;
+
+    // Delete any older .corrupt file for this specific config file so only 1 exists
+    try {
+      final dir = file.parent;
+      if (await dir.exists()) {
+        final prefix = '${file.path}.';
+        final oldCorruptFiles = dir.listSync().whereType<File>().where(
+          (f) => f.path.startsWith(prefix) && f.path.endsWith('.corrupt'),
+        );
+
+        for (final oldFile in oldCorruptFiles) {
+          try {
+            await oldFile.delete();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
+    final now = DateTime.now();
+    String pad(int n) => n.toString().padLeft(2, '0');
+    final timestamp =
+        '${now.year}${pad(now.month)}${pad(now.day)}_${pad(now.hour)}${pad(now.minute)}${pad(now.second)}';
+    final corruptFile = File('${file.path}.$timestamp.corrupt');
+
+    try {
+      try {
+        await file.rename(corruptFile.path);
+      } on FileSystemException {
+        // Fallback for file lock contention (especially on Windows)
+        await file.copy(corruptFile.path);
+        await file.delete();
+      }
+      onLog?.call('[typed_config] Quarantined corrupted config file to ${corruptFile.path}');
+    } catch (e, s) {
+      onLog?.call('[typed_config] Failed to quarantine corrupt config file: $e');
+      onError?.call(e, s);
+    }
   }
 
   static void _runMigrations({
