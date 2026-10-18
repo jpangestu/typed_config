@@ -4,10 +4,10 @@ Manage and persist application configs (or settings, or preferences, or whatever
 
 ## Features
 
-- **Strictly Type-Safe:** Guarantees non-null values with compile-time type checking.
+- **Type-Safe:** Compile-time validation prevents type mismatches and eliminates manual casting.
 - **Synchronous Reads:** In-memory cache allows instant synchronous reads.
-- **Debounced Background Saves:** 300ms debounce prevents disk thrashing on slider scrubbing or rapid typing.
-- **Domain Groups & Auto-Namespacing:** Organize settings into sub-group (e.g., AudioSettings, UiSettings); keys are automatically namespaced (['audio', 'volume']) and serialize into indented nested JSON on disk.
+- **Debounced Saves:** Non-blocking, debounced file writes prevent disk thrashing during rapid state updates.
+- **Domain Groups & Auto-Namespacing:** Organize configs into sub-group (e.g., AudioSettings, UiSettings); keys are automatically namespaced (['audio', 'volume']) and serialize into indented nested JSON on disk.
 - **Schema Migrations:** Safely migrate configuration schemas sequentially between app releases ($v1 \rightarrow v2$).
 - **Crash & Corruption Recovery:** Automatically quarantines malformed or damaged JSON files with a timestamp (e.g., `.<timestamp>.corrupt`) before restoring clean defaults.
 - **Zero Framework Coupling:** Pure Dart library with no Flutter or UI dependencies.

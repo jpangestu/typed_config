@@ -14,7 +14,7 @@ final class ConfigBuilder({
   /// Defines a strongly-typed configuration entry.
   ///
   /// [key] is the name of the setting at the current hierarchy level.
-  /// [defaultValue] is used when the setting is missing from storage or null.
+  /// [defaultValue] is used when the setting is missing from storage or invalid.
   ///
   /// Provide [fromJson] and [toJson] for custom objects or types that need
   /// conversion to and from JSON primitives.
@@ -36,23 +36,33 @@ final class ConfigBuilder({
   /// Defines an enum configuration entry with automatic string serialization.
   ///
   /// Matches stored JSON string values against [values] and falls back to
-  /// [defaultValue] if invalid or absent.
-  ConfigEntry<E> defineEnum<E extends Enum>(
+  /// [defaultValue] if the stored value is invalid or absent.
+  ///
+  /// Pass the enum's static `.values` list to [values] to enable name lookup:
+  /// ```dart
+  /// enum ThemeMode { system, light, dark }
+  ///
+  /// final theme = builder.defineEnum(
+  ///   'theme',
+  ///   ThemeMode.system,
+  ///   values: ThemeMode.values,
+  /// );
+  /// ```
+  ConfigEntry<E> defineEnum<E extends Enum?>(
     String key,
     E defaultValue, {
-    required Iterable<E> values,
+    required Iterable<Enum> values,
   }) {
-    // Create a lookup map: {'system': ThemeMode.system, 'dark': ThemeMode.dark}
     final lookupTable = <String, E>{};
     for (final enumValue in values) {
-      lookupTable[enumValue.name] = enumValue;
+      lookupTable[enumValue.name] = enumValue as E;
     }
 
     return define<E>(
       key,
       defaultValue,
       fromJson: (jsonValue) => lookupTable[jsonValue] ?? defaultValue,
-      toJson: (enumValue) => enumValue.name,
+      toJson: (enumValue) => (enumValue as Enum?)?.name,
     );
   }
 
@@ -87,6 +97,9 @@ final class ConfigBuilder({
         if (itemFromJson != null) {
           return json.map(itemFromJson).toList();
         }
+        if (T == double) {
+          return json.map((e) => (e as num).toDouble()).cast<T>().toList();
+        }
         return json.cast<T>().toList();
       },
       toJson: itemToJson != null ? (list) => list.map(itemToJson).toList() : null,
@@ -118,8 +131,12 @@ final class ConfigEntry<T>({
   /// Updating this property writes to memory immediately and schedules a
   /// debounced disk save.
   T get value {
+    if (!_engine.containsKey(keyPath)) return defaultValue;
     final keyValue = _engine.read(keyPath);
-    if (keyValue == null) return defaultValue;
+    if (keyValue == null) {
+      if (null is T) return null as T;
+      return defaultValue;
+    }
     if (fromJson != null) {
       try {
         return fromJson!(keyValue);
@@ -135,7 +152,7 @@ final class ConfigEntry<T>({
   }
 
   set value(T newValue) {
-    final dynamic encodedValue = toJson != null ? toJson!(newValue) : newValue;
+    final dynamic encodedValue = newValue != null && toJson != null ? toJson!(newValue) : newValue;
     _engine.write(keyPath, encodedValue);
   }
 

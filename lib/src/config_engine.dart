@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File, FileSystemException;
 
+import 'package:collection/collection.dart';
+
 final class ConfigEngine({
   final File? _storedConfigFile,
   required final Map<String, dynamic> _inMemoryCache,
@@ -39,6 +41,7 @@ final class ConfigEngine({
 
     Map<String, dynamic> currentCache = _inMemoryCache;
 
+    // Create new map if not exist
     for (int i = 0; i < keyPath.length - 1; i++) {
       final segmentKey = keyPath[i];
       final next = currentCache[segmentKey];
@@ -57,8 +60,13 @@ final class ConfigEngine({
       }
     }
 
-    currentCache[keyPath.last] = value;
+    // Return if new value == old value
+    if (currentCache.containsKey(keyPath.last) &&
+        const DeepCollectionEquality().equals(currentCache[keyPath.last], value)) {
+      return;
+    }
 
+    currentCache[keyPath.last] = value;
     _isCacheNeedsSave = true;
     if (_changeController.isClosed == false) {
       _changeController.add(keyPath);

@@ -147,17 +147,18 @@ class Config(
   }
 
   static Future<void> _quarantineFile(
-    File file, {
+    File configFile, {
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) async {
-    if (!await file.exists()) return;
+    if (!await configFile.exists()) return;
 
     // Delete any older .corrupt file for this specific config file so only 1 exists
     try {
-      final dir = file.parent;
-      if (await dir.exists()) {
-        final prefix = '${file.path}.';
+      if (await configFile.parent.exists()) {
+        final targetFile = configFile.absolute;
+        final dir = targetFile.parent;
+        final prefix = '${targetFile.path}.';
         final oldCorruptFiles = dir.listSync().whereType<File>().where(
           (f) => f.path.startsWith(prefix) && f.path.endsWith('.corrupt'),
         );
@@ -174,15 +175,15 @@ class Config(
     String pad(int n) => n.toString().padLeft(2, '0');
     final timestamp =
         '${now.year}${pad(now.month)}${pad(now.day)}_${pad(now.hour)}${pad(now.minute)}${pad(now.second)}';
-    final corruptFile = File('${file.path}.$timestamp.corrupt');
+    final corruptFile = File('${configFile.path}.$timestamp.corrupt');
 
     try {
       try {
-        await file.rename(corruptFile.path);
+        await configFile.rename(corruptFile.path);
       } on FileSystemException {
         // Fallback for file lock contention (especially on Windows)
-        await file.copy(corruptFile.path);
-        await file.delete();
+        await configFile.copy(corruptFile.path);
+        await configFile.delete();
       }
       onLog?.call('[typed_config] Quarantined corrupted config file to ${corruptFile.path}');
     } catch (e, s) {
