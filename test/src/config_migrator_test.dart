@@ -3,9 +3,10 @@ import 'package:typed_config/src/config.dart';
 import 'package:typed_config/src/config_engine.dart';
 import 'package:typed_config/src/config_migrator.dart';
 
-class SampleConfig(super.builder) extends Config {
-  final theme = builder.define('theme', 'light');
-  final user = builder.define<Map<String, dynamic>>('user', const {});
+class SampleConfig extends Config {
+  SampleConfig(super.builder);
+  late final theme = builder.define('theme', 'light');
+  late final user = builder.define<Map<String, dynamic>>('user', const {});
 }
 
 void main() {

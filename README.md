@@ -7,7 +7,7 @@ Manage and persist application configs (or settings, or preferences, or whatever
 - **Type-Safe:** Compile-time validation prevents type mismatches and eliminates manual casting.
 - **Synchronous Reads:** In-memory cache allows instant synchronous reads.
 - **Debounced Saves:** Non-blocking, debounced file writes prevent disk thrashing during rapid state updates.
-- **Domain Groups & Auto-Namespacing:** Organize configs into sub-group (e.g., AudioSettings, UiSettings); keys are automatically namespaced (['audio', 'volume']) and serialize into indented nested JSON on disk.
+- **Domain Groups & Auto-Namespacing:** Organize configs into sub-group (e.g., AudioSettings, UiSettings); keys are automatically namespaced (`['audio', 'volume']`) and serialize into indented nested JSON on disk.
 - **Schema Migrations:** Safely migrate configuration schemas sequentially between app releases ($v1 \rightarrow v2$).
 - **Crash & Corruption Recovery:** Automatically quarantines malformed or damaged JSON files with a timestamp (e.g., `.<timestamp>.corrupt`) before restoring clean defaults.
 - **Zero Framework Coupling:** Pure Dart library with no Flutter or UI dependencies.
@@ -20,6 +20,8 @@ Organize config into domain-driven groups using `builder.group()`, mounted on yo
 
 ```dart
 enum ThemeMode { system, light, dark }
+
+// Uses Dart 3.13+ Primary Constructors (see below for Dart 3.2 – 3.12 syntax).
 
 // Main application config
 final class AppConfig(super.builder) extends Config {
@@ -39,6 +41,66 @@ final class UiSettings(super.builder) extends Config {
 ```
 
 > **Tip:** `builder.group('ui', UiSettings.new)` automatically prefixes child keys as `['ui', 'themeMode']`, formatting into indented nested objects on disk.
+
+<details>
+<summary><b>Using Dart 3.2 – 3.12 (without Primary Constructors)?</b></summary>
+
+In Dart versions prior to 3.13, because standard field initializers cannot reference `builder` before construction, choose between:
+
+#### Option A: Constructor Initialization (Eager)
+
+Initializes all entries eagerly during object creation using standard constructor initializer lists:
+
+```dart
+// Main application config
+final class AppConfig extends Config {
+  final ConfigEntry<String> language;
+  final ConfigEntry<bool> autoCheckUpdates;
+  final UiSettings ui;
+
+  AppConfig(super.builder)
+      : language = builder.define('language', 'en'),
+        autoCheckUpdates = builder.define('autoCheckUpdates', true),
+        ui = builder.group('ui', UiSettings.new);
+}
+
+// Grouped config
+final class UiSettings extends Config {
+  final ConfigEntry<ThemeMode> themeMode;
+  final ConfigEntry<bool> compactMode;
+  final ConfigEntry<double> fontScale;
+
+  UiSettings(super.builder)
+      : themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values),
+        compactMode = builder.define('compactMode', false),
+        fontScale = builder.define('fontScale', 1.0);
+}
+```
+
+#### Option B: Inline Field Initialization (Lazy)
+
+Initializes entries lazily on first access using `late final`:
+
+```dart
+// Main application config
+final class AppConfig extends Config {
+  AppConfig(super.builder);
+
+  late final language = builder.define('language', 'en');
+  late final autoCheckUpdates = builder.define('autoCheckUpdates', true);
+  late final ui = builder.group('ui', UiSettings.new);
+}
+
+// Grouped config
+final class UiSettings extends Config {
+  UiSettings(super.builder);
+
+  late final themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values);
+  late final compactMode = builder.define('compactMode', false);
+  late final fontScale = builder.define('fontScale', 1.0);
+}
+```
+</details>
 
 ### 2. Initialize once in `main()`
 
@@ -220,4 +282,3 @@ class ThemeSelector extends ConsumerWidget {
 ## Additional information
 
 - **Issues & Feedback:** File bug reports and feature requests on [GitHub Issues](https://github.com/jpangestu/typed_config/issues).
-- **Contributing:** Pull requests are welcome! Please ensure all tests pass by running `dart test`.

@@ -7,10 +7,19 @@ import 'package:typed_config/src/config_engine.dart';
 ///
 /// Used during application setup to declare strongly-typed [ConfigEntry] instances
 /// and organized domain-driven [group]s with automatic key path prefixing.
-final class ConfigBuilder({
-  @internal required final ConfigEngine engine,
-  required final List<String> prefixPath,
-}) {
+final class ConfigBuilder {
+  @internal
+  final ConfigEngine engine;
+
+  /// The hierarchical key path segments prepended to entries defined in this builder.
+  final List<String> prefixPath;
+
+  /// Creates a [ConfigBuilder] with the given [engine] and [prefixPath].
+  ConfigBuilder({
+    @internal required this.engine,
+    required this.prefixPath,
+  });
+
   /// Defines a strongly-typed configuration entry.
   ///
   /// [key] is the name of the setting at the current hierarchy level.
@@ -118,13 +127,30 @@ final class ConfigBuilder({
 /// The typed bridge between the application schema and the untyped [ConfigEngine].
 ///
 /// [ConfigEntry] represents a leaf node in the configuration tree:
-final class ConfigEntry<T>({
-  required final List<String> keyPath,
-  required final T defaultValue,
-  final T Function(dynamic json)? fromJson,
-  final dynamic Function(T value)? toJson,
-  required final ConfigEngine _engine,
-}) {
+final class ConfigEntry<T> {
+  /// The hierarchical sequence of keys identifying this entry in storage.
+  final List<String> keyPath;
+
+  /// The fallback value used when the setting is missing from storage or corrupted.
+  final T defaultValue;
+
+  /// Optional converter from raw JSON primitives to type [T].
+  final T Function(dynamic json)? fromJson;
+
+  /// Optional converter from type [T] to JSON-serializable primitives.
+  final dynamic Function(T value)? toJson;
+
+  final ConfigEngine _engine;
+
+  /// Creates a [ConfigEntry] bound to [keyPath] and backed by [engine].
+  ConfigEntry({
+    required this.keyPath,
+    required this.defaultValue,
+    required ConfigEngine engine,
+    this.fromJson,
+    this.toJson,
+  }) : _engine = engine;
+
   /// The current value of this configuration setting.
   ///
   /// Returns the in-memory cached value, or [defaultValue] if unset.

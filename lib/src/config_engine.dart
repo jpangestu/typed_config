@@ -4,14 +4,22 @@ import 'dart:io' show File, FileSystemException;
 
 import 'package:collection/collection.dart';
 
-final class ConfigEngine({
-  final File? _storedConfigFile,
-  required final Map<String, dynamic> _inMemoryCache,
-  Duration? debounceDuration,
-  final void Function(String message)? onLog,
-  final void Function(Object error, StackTrace stackTrace)? onError,
-}) {
-  final Duration debounceDuration = debounceDuration ?? const Duration(milliseconds: 300);
+final class ConfigEngine {
+  final File? _storedConfigFile;
+  final Map<String, dynamic> _inMemoryCache;
+  final Duration debounceDuration;
+  final void Function(String message)? onLog;
+  final void Function(Object error, StackTrace stackTrace)? onError;
+
+  ConfigEngine({
+    File? storedConfigFile,
+    required Map<String, dynamic> inMemoryCache,
+    Duration? debounceDuration,
+    this.onLog,
+    this.onError,
+  })  : _storedConfigFile = storedConfigFile,
+        _inMemoryCache = inMemoryCache,
+        debounceDuration = debounceDuration ?? const Duration(milliseconds: 300);
   bool _isCacheNeedsSave = false;
   bool _isFlushing = false;
   Timer? _debouncedTimer;

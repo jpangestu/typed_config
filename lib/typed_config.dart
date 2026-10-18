@@ -1,3 +1,5 @@
+/// A type-safe key-value store for application configurations with
+/// synchronous in-memory reads and disk persistence.
 library;
 
 export 'src/config.dart';

@@ -8,15 +8,22 @@ typedef MigrationHandler = void Function(ConfigMigrator migrator);
 ///
 /// Provides helper methods to safely traverse, read, write, rename, and transform
 /// values across hierarchical key paths without manual null-checking.
-final class ConfigMigrator({
-  required final ConfigEngine _configEngine,
+final class ConfigMigrator {
+  final ConfigEngine _configEngine;
 
   /// The original schema version the configuration file was loaded with, or `null` if unversioned.
-  final int? fromVersion,
+  final int? fromVersion;
 
   /// The target schema version being migrated to.
-  final int? toVersion,
-}) {
+  final int? toVersion;
+
+  /// Creates a [ConfigMigrator] backed by [configEngine].
+  ConfigMigrator({
+    required ConfigEngine configEngine,
+    this.fromVersion,
+    this.toVersion,
+  }) : _configEngine = configEngine;
+
   /// The underlying raw in-memory JSON configuration map.
   ///
   /// Can be used directly for arbitrary map transformations not covered by helper methods.

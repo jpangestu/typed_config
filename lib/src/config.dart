@@ -9,16 +9,22 @@ import 'package:typed_config/src/config_migrator.dart';
 ///
 /// Subclass [Config] to declare settings and nested groups using [ConfigBuilder]:
 /// ```dart
-/// class AppConfig(super.builder) extends Config {
-///   final theme = builder.define('theme', 'system');
-///   final volume = builder.define('volume', 0.8);
-///   final audio = builder.group('audio', AudioConfig.new);
+/// class AppConfig extends Config {
+///   AppConfig(super.builder);
+///
+///   late final theme = builder.define('theme', 'system');
+///   late final volume = builder.define('volume', 0.8);
+///   late final audio = builder.group('audio', AudioConfig.new);
 /// }
 /// ```
-class Config(
+class Config {
   /// The builder context used to define entries and groups for this config.
-  final ConfigBuilder builder,
-) {
+  final ConfigBuilder builder;
+
+  /// Creates a configuration schema bound to [builder].
+  Config(this.builder);
+
+  /// Key used in root storage to track schema version for migrations.
   static const String schemaVersionKey = 'schemaVersion';
 
   /// Loads configuration from [configFile], falling back to defaults if missing.
@@ -161,8 +167,8 @@ class Config(
         final targetPath = targetFile.path.replaceAll(r'\', '/');
         final prefix = '$targetPath.';
         final oldCorruptFiles = dir.listSync().whereType<File>().where(
-          (f) => f.path.replaceAll(r'\', '/').startsWith(prefix) && f.path.endsWith('.corrupt'),
-        );
+              (f) => f.path.replaceAll(r'\', '/').startsWith(prefix) && f.path.endsWith('.corrupt'),
+            );
 
         for (final oldFile in oldCorruptFiles) {
           try {

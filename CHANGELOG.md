@@ -1,13 +1,17 @@
 ## 0.2.0
 
 - **Class-based schemas**: Subclass `Config` using `ConfigBuilder`.
-- **Primary constructors**: Set dart sdk minimum to 3.13.0 for to "force" a simpler way of defining config.
+- **Dart 3.2+ support**: Lowered minimum SDK constraint to `^3.2.0`.
 - **Domain groups**: Organize settings into modular groups via `builder.group('namespace', SubConfig.new)`.
 - **Direct entry access**: Get and set values directly via `entry.value` instead of `config.get`/`config.set`.
 - **Entry utilities**: Added `entry.isModified`, `entry.reset()`, `entry.resetAll()`, and reactive `entry.changes` broadcast stream.
 - **Specialized builders**: Added `builder.defineEnum()` and `builder.defineList()` with automatic serialization.
 - **In-memory testing**: Added `Config.inMemory(create: ...)` for instant unit testing without disk I/O.
 - **Schema migrations**: Added `ConfigMigrator` and `MigrationHandler` with path helpers (`rename`, `transform`, `read`, `write`, `remove`, `containsKey`, `raw`) for sequential version upgrades in `Config.initialize` and `Config.inMemory`.
+
+## 0.1.1
+
+- Updated repository links, documentation, and license metadata.
 
 ## 0.1.0
 

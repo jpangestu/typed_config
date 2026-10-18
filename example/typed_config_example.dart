@@ -1,3 +1,5 @@
+// @dart = 3.13
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +8,9 @@ import 'package:typed_config/typed_config.dart';
 /// ---------------------------------------------------------------------------
 /// Enums & Custom Object
 /// ---------------------------------------------------------------------------
+
+// NOTE: This example uses Dart 3.13+ Primary Constructors syntax.
+// If your project uses Dart 3.2 - 3.12, see the README for standard constructor patterns.
 
 enum ThemeMode { system, light, dark }
 
@@ -26,12 +31,12 @@ final class const WindowSize(final int width, final int height) {
 }
 
 /// ---------------------------------------------------------------------------
-/// Defining config & Sub-group
+/// Defining config & Sub-group (using Dart 3.13+ Primary Constructors)
 /// ---------------------------------------------------------------------------
 
 /// Sub-group for UI config: 'ui.*'
 final class UiSettings(super.builder) extends Config {
-  // Enum config with automatic name serialization
+  // Enum config
   final themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values);
   final compactMode = builder.define('compactMode', false);
   final fontScale = builder.define('fontScale', 1.0);

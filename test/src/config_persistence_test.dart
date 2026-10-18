@@ -4,10 +4,11 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:typed_config/src/config.dart';
 
-class TestConfig(super.builder) extends Config {
-  final appName = builder.define('appName', 'DefaultApp');
-  final theme = builder.define('theme', 'system');
-  final port = builder.define('port', 8080);
+class TestConfig extends Config {
+  TestConfig(super.builder);
+  late final appName = builder.define('appName', 'DefaultApp');
+  late final theme = builder.define('theme', 'system');
+  late final port = builder.define('port', 8080);
 }
 
 void main() {
@@ -231,11 +232,8 @@ void main() {
         expect(capturedError, isNotNull);
 
         // Verify corrupt file was created
-        final corruptFiles = tempDir
-            .listSync()
-            .whereType<File>()
-            .where((f) => f.path.contains('.corrupt'))
-            .toList();
+        final corruptFiles =
+            tempDir.listSync().whereType<File>().where((f) => f.path.contains('.corrupt')).toList();
 
         expect(corruptFiles, hasLength(1));
         expect(await corruptFiles.first.readAsString(), equals('{ invalid_json: '));
@@ -256,11 +254,8 @@ void main() {
         expect(config.appName.value, equals('DefaultApp'));
         expect(capturedError, isA<FormatException>());
 
-        final corruptFiles = tempDir
-            .listSync()
-            .whereType<File>()
-            .where((f) => f.path.contains('.corrupt'))
-            .toList();
+        final corruptFiles =
+            tempDir.listSync().whereType<File>().where((f) => f.path.contains('.corrupt')).toList();
 
         expect(corruptFiles, hasLength(1));
         expect(await corruptFiles.first.readAsString(), equals('[1, 2, 3]'));
@@ -278,11 +273,8 @@ void main() {
 
         final config = await Config.initialize(configFile: configFile, create: TestConfig.new);
 
-        final corruptFiles = tempDir
-            .listSync()
-            .whereType<File>()
-            .where((f) => f.path.contains('.corrupt'))
-            .toList();
+        final corruptFiles =
+            tempDir.listSync().whereType<File>().where((f) => f.path.contains('.corrupt')).toList();
 
         expect(corruptFiles, hasLength(1));
         expect(await corruptFiles.first.readAsString(), equals('new broken json'));
