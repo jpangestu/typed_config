@@ -158,9 +158,10 @@ class Config(
       if (await configFile.parent.exists()) {
         final targetFile = configFile.absolute;
         final dir = targetFile.parent;
-        final prefix = '${targetFile.path}.';
+        final targetPath = targetFile.path.replaceAll(r'\', '/');
+        final prefix = '$targetPath.';
         final oldCorruptFiles = dir.listSync().whereType<File>().where(
-          (f) => f.path.startsWith(prefix) && f.path.endsWith('.corrupt'),
+          (f) => f.path.replaceAll(r'\', '/').startsWith(prefix) && f.path.endsWith('.corrupt'),
         );
 
         for (final oldFile in oldCorruptFiles) {

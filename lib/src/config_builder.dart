@@ -159,9 +159,6 @@ final class ConfigEntry<T>({
   /// Revert this entry value back to [defaultValue].
   void reset() => _engine.remove(keyPath);
 
-  /// The dot-separated path identifier (e.g., 'audio.volume').
-  String get key => keyPath.join('.');
-
   /// Whether this entry has been explicitly modified.
   bool get isModified => _engine.containsKey(keyPath);
 
@@ -177,5 +174,5 @@ final class ConfigEntry<T>({
       _engine.watchKey(keyPath).map((_) => value).distinct(const DeepCollectionEquality().equals);
 
   @override
-  String toString() => 'ConfigEntry<$T>($key: $value)';
+  String toString() => 'ConfigEntry<$T>($keyPath: $value)';
 }
