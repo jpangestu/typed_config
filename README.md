@@ -16,14 +16,14 @@ Manage and persist application configs (or settings, or preferences, or whatever
 
 ### 1. Define your config
 
-Organize config into domain-driven groups using `builder.group()`, mounted on your root `Config`:
+Create your configuration schema by extending `Config`. You can define individual configs or organize them into domain-driven groups using `builder.group()`:
 
 ```dart
 enum ThemeMode { system, light, dark }
 
 // Uses Dart 3.13+ Primary Constructors (see below for Dart 3.2 – 3.12 syntax).
 
-// Main application config
+// Main application configuration
 final class AppConfig(super.builder) extends Config {
   final language = builder.define('language', 'en');
   final autoCheckUpdates = builder.define('autoCheckUpdates', true);
@@ -207,46 +207,54 @@ import 'package:typed_config/typed_config.dart';
 
 final _entryProviderCache = Expando<Object>();
 
-/// A Riverpod [Notifier] that synchronizes a single [ConfigEntry].
-class ConfigEntryNotifier<T> extends Notifier<T> {
-  final ConfigEntry<T> _entry;
-
-  ConfigEntryNotifier(this._entry);
-
-  @override
-  T build() {
-    final sub = _entry.changes.listen((newValue) {
-      state = newValue;
-    });
-    ref.onDispose(sub.cancel);
-    return _entry.value;
-  }
-
-  /// Sets a new value in memory and schedules a debounced disk save.
-  void set(T value) => _entry.value = value;
-
-  /// Reverts this setting back to its default value.
-  void reset() => _entry.reset();
-}
-
-/// Riverpod extension providing fine-grained, zero-boilerplate providers for [ConfigEntry].
+/// Extension to add a reactive [provider] getter to [ConfigEntry].
 extension ConfigEntryRiverpodX<T> on ConfigEntry<T> {
-  /// Returns a cached [NotifierProvider] tied strictly to this entry.
-  NotifierProvider<ConfigEntryNotifier<T>, T> get provider {
+  Provider<T> get provider {
     final cached = _entryProviderCache[this];
-    if (cached != null) {
-      return cached as NotifierProvider<ConfigEntryNotifier<T>, T>;
-    }
-    final created = NotifierProvider<ConfigEntryNotifier<T>, T>(
-      () => ConfigEntryNotifier<T>(this),
-    );
+    if (cached != null) return cached as Provider<T>;
+
+    final created = Provider<T>((ref) {
+      final sub = changes.listen((_) => ref.invalidateSelf());
+      ref.onDispose(sub.cancel);
+      return value;
+    });
     _entryProviderCache[this] = created;
     return created;
   }
 }
+
+/// Provider for your main configuration class. Override this in [ProviderScope].
+final appConfigProvider = Provider<AppConfig>((ref) {
+  throw UnimplementedError('appConfigProvider must be overridden in ProviderScope');
+});
 ```
 
-#### Consuming in Widgets
+#### Setup in `main.dart`
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final config = await Config.initialize(
+    configFile: File('path/to/config.json'),
+    create: AppConfig.new,
+  );
+
+  runApp(
+    ProviderScope(
+      overrides: [
+        appConfigProvider.overrideWith((ref) {
+          ref.onDispose(config.dispose);
+          return config;
+        }),
+      ],
+      child: const MyApp(),
+    ),
+  );
+}
+```
+
+#### Usage in Widgets
 
 ```dart
 class ThemeSelector extends ConsumerWidget {
@@ -254,12 +262,10 @@ class ThemeSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Your main configuration class
-    final config = ref.watch(appConfigProvider);
+    final appConfig = ref.watch(appConfigProvider);
 
     // Notice the usage of .provider here
-    // This rebuilds ONLY when ui.themeMode changes!
-    final themeMode = ref.watch(config.ui.themeMode.provider);
+    final themeMode = ref.watch(appConfig.ui.themeMode.provider);
 
     return SegmentedButton<ThemeMode>(
       segments: const [
@@ -268,8 +274,7 @@ class ThemeSelector extends ConsumerWidget {
         ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
       ],
       selected: {themeMode},
-      // Direct mutation: updates RAM, syncs watching widgets immediately, debounces disk save
-      onSelectionChanged: (selected) => config.ui.themeMode.value = selected.first,
+      onSelectionChanged: (selected) => appConfig.ui.themeMode.value = selected.first,
     );
   }
 }

@@ -1,3 +1,7 @@
+## 0.2.1
+
+- Documentation updates and improved Riverpod integration guide.
+
 ## 0.2.0
 
 - **Class-based schemas**: Subclass `Config` using `ConfigBuilder`.
