@@ -146,7 +146,7 @@ final class ConfigEngine {
     });
   }
 
-  /// Raw copy of in-memory cache
+  /// Direct reference to the raw in-memory configuration map.
   Map<String, dynamic> get raw => _inMemoryCache;
 
   void _debouncedSave() {
@@ -159,7 +159,7 @@ final class ConfigEngine {
   /// Persists pending in-memory configuration changes to disk immediately.
   ///
   /// Cancels any active debounce timer and (atomic) writes in-memory cache
-  /// Does nothing if running in-memory or if there are no unsaved changes.
+  /// Does nothing if there are no unsaved changes or if running TypedConfig.inMemory().
   Future<void> flush() async {
     if (_storedConfigFile == null || _isCacheNeedsSave == false || _isFlushing) return;
     _debouncedTimer?.cancel();

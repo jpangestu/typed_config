@@ -1,9 +1,9 @@
 import 'package:collection/collection.dart';
 import 'package:meta/meta.dart';
-import 'package:typed_config/src/config.dart';
 import 'package:typed_config/src/config_engine.dart';
+import 'package:typed_config/src/typed_config.dart';
 
-/// A configuration construction context passed to [Config] constructors.
+/// A config construction context passed to [TypedConfig] constructors.
 ///
 /// Used during application setup to declare strongly-typed [ConfigEntry] instances
 /// and organized domain-driven [group]s with automatic key path prefixing.
@@ -22,11 +22,12 @@ final class ConfigBuilder {
 
   /// Defines a strongly-typed configuration entry.
   ///
-  /// [key] is the name of the setting at the current hierarchy level.
-  /// [defaultValue] is used when the setting is missing from storage or invalid.
+  /// [key] is the name of the config at the current hierarchy level.
+  /// [defaultValue] is used when the config is invalid or missing from storage.
   ///
   /// Provide [fromJson] and [toJson] for custom objects or types that need
-  /// conversion to and from JSON primitives.
+  /// conversion to and from JSON. Built-in types (int, double, string, bool)
+  /// will be handled automatically.
   ConfigEntry<T> define<T>(
     String key,
     T defaultValue, {
@@ -47,7 +48,7 @@ final class ConfigBuilder {
   /// Matches stored JSON string values against [values] and falls back to
   /// [defaultValue] if the stored value is invalid or absent.
   ///
-  /// Pass the enum's static `.values` list to [values] to enable name lookup:
+  /// Pass the enum's static `.values` list to [values] (required for name lookup):
   /// ```dart
   /// enum ThemeMode { system, light, dark }
   ///
@@ -115,11 +116,11 @@ final class ConfigBuilder {
     );
   }
 
-  /// Instantiates a nested [Config] group under the namespace [name].
+  /// Instantiates a nested [TypedConfig] group under the namespace [name].
   ///
   /// Entries declared within the returned group automatically have [name]
   /// prepended to their key path.
-  G group<G extends Config>(String name, G Function(ConfigBuilder builder) create) {
+  G group<G extends TypedConfig>(String name, G Function(ConfigBuilder builder) create) {
     return create(ConfigBuilder(engine: engine, prefixPath: [...prefixPath, name]));
   }
 }

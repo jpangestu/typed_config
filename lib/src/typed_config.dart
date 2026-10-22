@@ -5,41 +5,49 @@ import 'package:typed_config/src/config_builder.dart';
 import 'package:typed_config/src/config_engine.dart';
 import 'package:typed_config/src/config_migrator.dart';
 
-/// Base class for strongly-typed application configuration schemas.
+@Deprecated('Use TypedConfig instead. Will be removed in 1.0.0.')
+typedef Config = TypedConfig;
+
+/// Base class for strongly-typed application config schemas.
 ///
-/// Subclass [Config] to declare settings and nested groups using [ConfigBuilder]:
+/// Extends this class to define your configs:
 /// ```dart
-/// class AppConfig extends Config {
-///   AppConfig(super.builder);
-///
-///   late final theme = builder.define('theme', 'system');
-///   late final volume = builder.define('volume', 0.8);
-///   late final audio = builder.group('audio', AudioConfig.new);
+/// class AppConfig(super.builder) extends TypedConfig {
+///   final theme = builder.define('theme', 'system');
+///   final volume = builder.define('volume', 0.8);
+///   final audio = builder.group('audio', AudioConfig.new);
 /// }
 /// ```
-class Config {
+class TypedConfig {
   /// The builder context used to define entries and groups for this config.
   final ConfigBuilder builder;
 
   /// Creates a configuration schema bound to [builder].
-  Config(this.builder);
+  TypedConfig(this.builder);
 
   /// Key used in root storage to track schema version for migrations.
   static const String schemaVersionKey = 'schemaVersion';
 
   /// Loads configuration from [configFile], falling back to defaults if missing.
   ///
-  /// Pass [create] as the constructor tear-off for your [Config] subclass:
+  /// Pass your [TypedConfig] definition class to [create] and add migration changes if needed:
   /// ```dart
-  /// final config = await Config.initialize(
+  /// final config = await TypedConfig.initialize(
   ///   configFile: File('config.json'),
-  ///   create: AppConfig.new,
+  ///   create: AppConfig.new, // Short for (builder) => AppConfig(builder)
+  ///   schemaVersion: 2,
+  ///   migrations: {
+  ///     2: (migrator) {
+  ///       migrator.rename(['oldKey'], ['newGroup', 'newKey'])
+  ///       ...
+  ///     }
+  ///   }
   /// );
   /// ```
   ///
-  /// Changes to settings are debounced by [debounceDuration] (defaulting to 300ms)
+  /// Changes to configs are debounced by [debounceDuration] (defaulting to 300ms)
   /// before being atomically saved to disk.
-  static Future<T> initialize<T extends Config>({
+  static Future<T> initialize<T extends TypedConfig>({
     required File configFile,
     required T Function(ConfigBuilder builder) create,
     int schemaVersion = 1,
@@ -106,16 +114,18 @@ class Config {
   ///
   /// Ideal for unit tests, headless environments, or transient application state:
   /// ```dart
-  /// final testConfig = Config.inMemory(
+  /// final testConfig = TypedConfig.inMemory(
   ///   create: AppConfig.new,
   ///   initialData: {'volume': 0.5},
   ///   schemaVersion: 2,
   ///   migrations: {
-  ///     2: (m) => m.rename(['volume'], ['audio', 'volume']),
+  ///     2: (migrator) {
+  ///       migrator.rename(['volume'], ['audio', 'volume']);
+  ///     },
   ///   },
   /// );
   /// ```
-  static T inMemory<T extends Config>({
+  static T inMemory<T extends TypedConfig>({
     required T Function(ConfigBuilder builder) create,
     Map<String, dynamic>? initialData,
     int schemaVersion = 1,

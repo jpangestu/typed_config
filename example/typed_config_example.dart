@@ -35,7 +35,7 @@ final class const WindowSize(final int width, final int height) {
 /// ---------------------------------------------------------------------------
 
 /// Sub-group for UI config: 'ui.*'
-final class UiSettings(super.builder) extends Config {
+final class UiConfig(super.builder) extends TypedConfig {
   // Enum config
   final themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values);
   final compactMode = builder.define('compactMode', false);
@@ -43,7 +43,7 @@ final class UiSettings(super.builder) extends Config {
 }
 
 /// Main application configuration.
-final class AppConfig(super.builder) extends Config {
+final class AppConfig(super.builder) extends TypedConfig {
   // Standard built-in type configs (String, bool, int, double)
   final language = builder.define('language', 'en');
   final autoCheckUpdates = builder.define('autoCheckUpdates', true);
@@ -59,8 +59,8 @@ final class AppConfig(super.builder) extends Config {
   // List of built-in types
   final recentFiles = builder.defineList<String>('recentFiles', const []);
 
-  // Hierarchical nested config group
-  final ui = builder.group('ui', UiSettings.new);
+  // Nested config group
+  final ui = builder.group('ui', UiConfig.new);
 }
 
 /// ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ Future<void> main() async {
     // Initialize with Schema Migration to Version 2
     // -------------------------------------------------------------------------
     print('2. Initializing AppConfig with schemaVersion: 2 & migrations...');
-    final config = await Config.initialize(
+    final appConfig = await TypedConfig.initialize(
       configFile: configFile,
       create: AppConfig.new,
       schemaVersion: 2,
@@ -111,28 +111,30 @@ Future<void> main() async {
     // Reading Typed Values & Checking isModified
     // -------------------------------------------------------------------------
     print('\n3. Reading strongly-typed values:');
-    print('   - Language: "${config.language.value}" (modified: ${config.language.isModified})');
     print(
-      '   - Auto Check Updates: ${config.autoCheckUpdates.value} (modified: ${config.autoCheckUpdates.isModified})',
+      '   - Language: "${appConfig.language.value}" (modified: ${appConfig.language.isModified})',
     );
     print(
-      '   - Theme Mode: ${config.ui.themeMode.value} (migrated from v1, modified: ${config.ui.themeMode.isModified})',
+      '   - Auto Check Updates: ${appConfig.autoCheckUpdates.value} (modified: ${appConfig.autoCheckUpdates.isModified})',
     );
-    print('   - Compact Mode: ${config.ui.compactMode.value}');
-    print('   - Font Scale: ${config.ui.fontScale.value}');
     print(
-      '   - Window Size: ${config.windowSize.value} (default, modified: ${config.windowSize.isModified})',
+      '   - Theme Mode: ${appConfig.ui.themeMode.value} (migrated from v1, modified: ${appConfig.ui.themeMode.isModified})',
+    );
+    print('   - Compact Mode: ${appConfig.ui.compactMode.value}');
+    print('   - Font Scale: ${appConfig.ui.fontScale.value}');
+    print(
+      '   - Window Size: ${appConfig.windowSize.value} (default, modified: ${appConfig.windowSize.isModified})',
     );
 
     // -------------------------------------------------------------------------
     // Subscribing to Reactive Changes
     // -------------------------------------------------------------------------
     print('\n4. Listening to reactive change streams...');
-    final themeSubscription = config.ui.themeMode.changes.listen((newTheme) {
+    final themeSubscription = appConfig.ui.themeMode.changes.listen((newTheme) {
       print('   -> [Stream Event] UI theme mode updated to: $newTheme');
     });
 
-    final fontSubscription = config.ui.fontScale.changes.listen((newScale) {
+    final fontSubscription = appConfig.ui.fontScale.changes.listen((newScale) {
       print('   -> [Stream Event] UI font scale updated to: $newScale');
     });
 
@@ -140,11 +142,11 @@ Future<void> main() async {
     // Updating Settings
     // -------------------------------------------------------------------------
     print('\n5. Updating settings...');
-    config.ui.themeMode.value = ThemeMode.light;
-    config.ui.compactMode.value = true;
-    config.ui.fontScale.value = 1.25;
-    config.windowSize.value = const WindowSize(1920, 1080);
-    config.recentFiles.value = ['/docs/report.pdf', '/docs/notes.txt'];
+    appConfig.ui.themeMode.value = ThemeMode.light;
+    appConfig.ui.compactMode.value = true;
+    appConfig.ui.fontScale.value = 1.25;
+    appConfig.windowSize.value = const WindowSize(1920, 1080);
+    appConfig.recentFiles.value = ['/docs/report.pdf', '/docs/notes.txt'];
 
     // Give streams a moment to deliver events
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -154,18 +156,18 @@ Future<void> main() async {
     // -------------------------------------------------------------------------
     print('\n6. Resetting compact mode to default...');
     print(
-      '   Compact mode before reset: ${config.ui.compactMode.value} (isModified: ${config.ui.compactMode.isModified})',
+      '   Compact mode before reset: ${appConfig.ui.compactMode.value} (isModified: ${appConfig.ui.compactMode.isModified})',
     );
-    config.ui.compactMode.reset();
+    appConfig.ui.compactMode.reset();
     print(
-      '   Compact mode after reset: ${config.ui.compactMode.value} (isModified: ${config.ui.compactMode.isModified})',
+      '   Compact mode after reset: ${appConfig.ui.compactMode.value} (isModified: ${appConfig.ui.compactMode.isModified})',
     );
 
     // -------------------------------------------------------------------------
     // Persisting Changes to Disk
     // -------------------------------------------------------------------------
     print('\n7. Forcing flush to disk...');
-    await config.flush();
+    await appConfig.flush();
 
     print('   Updated file content on disk:');
     final encoder = JsonEncoder.withIndent('  ');
@@ -176,7 +178,7 @@ Future<void> main() async {
     // In-Memory Mode (For Tests / Headless)
     // -------------------------------------------------------------------------
     print('\n8. In-Memory Mode (Testing without touching disk):');
-    final testConfig = Config.inMemory(
+    final testConfig = TypedConfig.inMemory(
       create: AppConfig.new,
       initialData: {
         'language': 'fr',
@@ -194,7 +196,7 @@ Future<void> main() async {
     print('\n9. Disposing config and cleaning up resources...');
     await themeSubscription.cancel();
     await fontSubscription.cancel();
-    config.dispose();
+    appConfig.dispose();
 
     print('\n=== All typed_config features demonstrated successfully! ===');
   } finally {

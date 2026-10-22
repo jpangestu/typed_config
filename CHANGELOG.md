@@ -1,3 +1,8 @@
+## 0.2.2
+
+- Renamed `Config` to `TypedConfig` and add `@Deprecated` `Config` type alias for backward compatibility.
+- Update doc and add setup guides for Vanilla Flutter and `package:provider`.
+
 ## 0.2.1
 
 - Documentation updates and improved Riverpod integration guide.

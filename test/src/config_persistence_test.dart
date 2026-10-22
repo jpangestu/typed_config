@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:typed_config/src/config.dart';
+import 'package:typed_config/src/typed_config.dart';
 
-class TestConfig extends Config {
+class TestConfig extends TypedConfig {
   TestConfig(super.builder);
   late final appName = builder.define('appName', 'DefaultApp');
   late final theme = builder.define('theme', 'system');
@@ -27,9 +27,9 @@ void main() {
       }
     });
 
-    group('Config.inMemory', () {
+    group('TypedConfig.inMemory', () {
       test('operates without touching disk', () async {
-        final config = Config.inMemory(create: TestConfig.new);
+        final config = TypedConfig.inMemory(create: TestConfig.new);
 
         config.appName.value = 'InMemoryApp';
         await config.flush();
@@ -40,7 +40,7 @@ void main() {
 
       test('deep copies initialData to prevent external map mutation leaks', () {
         final mutableMap = <String, dynamic>{'appName': 'Initial'};
-        final config = Config.inMemory(create: TestConfig.new, initialData: mutableMap);
+        final config = TypedConfig.inMemory(create: TestConfig.new, initialData: mutableMap);
 
         // Mutate the original map externally
         mutableMap['appName'] = 'MutatedOutside';
@@ -51,7 +51,7 @@ void main() {
       });
 
       test('resetAll clears entries and preserves schemaVersion in memory', () async {
-        final config = Config.inMemory(
+        final config = TypedConfig.inMemory(
           create: TestConfig.new,
           initialData: {'schemaVersion': 2, 'appName': 'CustomApp'},
           schemaVersion: 2,
@@ -62,14 +62,14 @@ void main() {
         await config.resetAll();
 
         expect(config.appName.value, equals('DefaultApp'));
-        expect(config.builder.engine.read([Config.schemaVersionKey]), equals(2));
+        expect(config.builder.engine.read([TypedConfig.schemaVersionKey]), equals(2));
         config.dispose();
       });
     });
 
-    group('Config.initialize', () {
+    group('TypedConfig.initialize', () {
       test('initializes with defaults when file does not exist', () async {
-        final config = await Config.initialize(configFile: configFile, create: TestConfig.new);
+        final config = await TypedConfig.initialize(configFile: configFile, create: TestConfig.new);
 
         expect(config.appName.value, equals('DefaultApp'));
         expect(config.port.value, equals(8080));
@@ -77,7 +77,7 @@ void main() {
         // File should exist because initialize flushes schema version
         expect(await configFile.exists(), isTrue);
         final diskData = jsonDecode(await configFile.readAsString());
-        expect(diskData[Config.schemaVersionKey], equals(1));
+        expect(diskData[TypedConfig.schemaVersionKey], equals(1));
 
         config.dispose();
       });
@@ -87,7 +87,7 @@ void main() {
           jsonEncode({'appName': 'DiskApp', 'port': 9090, 'schemaVersion': 1}),
         );
 
-        final config = await Config.initialize(configFile: configFile, create: TestConfig.new);
+        final config = await TypedConfig.initialize(configFile: configFile, create: TestConfig.new);
 
         expect(config.appName.value, equals('DiskApp'));
         expect(config.port.value, equals(9090));
@@ -97,7 +97,7 @@ void main() {
       });
 
       test('debounces saves to disk', () async {
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           debounceDuration: const Duration(milliseconds: 100),
@@ -119,7 +119,7 @@ void main() {
       });
 
       test('flush persists changes immediately', () async {
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           debounceDuration: const Duration(seconds: 10),
@@ -135,7 +135,7 @@ void main() {
       });
 
       test('dispose synchronously persists pending changes', () async {
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           debounceDuration: const Duration(seconds: 10),
@@ -151,7 +151,7 @@ void main() {
       });
 
       test('resetAll clears entries and preserves schemaVersion on disk', () async {
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           schemaVersion: 3,
@@ -164,7 +164,7 @@ void main() {
 
         final diskData = jsonDecode(await configFile.readAsString());
         expect(diskData['appName'], isNull);
-        expect(diskData[Config.schemaVersionKey], equals(3));
+        expect(diskData[TypedConfig.schemaVersionKey], equals(3));
 
         config.dispose();
       });
@@ -172,7 +172,7 @@ void main() {
 
     group('Concurrency & Race Condition Handling', () {
       test('handles concurrent flush calls safely via _isFlushing guard', () async {
-        final config = await Config.initialize(configFile: configFile, create: TestConfig.new);
+        final config = await TypedConfig.initialize(configFile: configFile, create: TestConfig.new);
 
         config.appName.value = 'ConcurrentApp';
 
@@ -190,7 +190,7 @@ void main() {
       });
 
       test('dirty writes during in-flight flush are preserved', () async {
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           debounceDuration: const Duration(milliseconds: 50),
@@ -221,7 +221,7 @@ void main() {
         Object? capturedError;
         final logs = <String>[];
 
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           onLog: logs.add,
@@ -245,7 +245,7 @@ void main() {
         await configFile.writeAsString('[1, 2, 3]');
 
         Object? capturedError;
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           onError: (err, stack) => capturedError = err,
@@ -271,7 +271,7 @@ void main() {
         // New corrupt main file
         await configFile.writeAsString('new broken json');
 
-        final config = await Config.initialize(configFile: configFile, create: TestConfig.new);
+        final config = await TypedConfig.initialize(configFile: configFile, create: TestConfig.new);
 
         final corruptFiles =
             tempDir.listSync().whereType<File>().where((f) => f.path.contains('.corrupt')).toList();
@@ -287,7 +287,7 @@ void main() {
     group('Windows file locking & atomic rename fallback', () {
       test('recovers and persists successfully once file lock contention is released', () async {
         Object? capturedError;
-        final config = await Config.initialize(
+        final config = await TypedConfig.initialize(
           configFile: configFile,
           create: TestConfig.new,
           onError: (err, stack) => capturedError = err,

@@ -1,9 +1,9 @@
 import 'package:test/test.dart';
-import 'package:typed_config/src/config.dart';
 import 'package:typed_config/src/config_engine.dart';
 import 'package:typed_config/src/config_migrator.dart';
+import 'package:typed_config/src/typed_config.dart';
 
-class SampleConfig extends Config {
+class SampleConfig extends TypedConfig {
   SampleConfig(super.builder);
   late final theme = builder.define('theme', 'light');
   late final user = builder.define<Map<String, dynamic>>('user', const {});
@@ -70,20 +70,20 @@ void main() {
     group('Config migration pipeline', () {
       test('stamps schemaVersion without running migrations on first setup', () {
         var migrationRan = false;
-        final config = Config.inMemory(
+        final config = TypedConfig.inMemory(
           create: SampleConfig.new,
           schemaVersion: 2,
           migrations: {2: (m) => migrationRan = true},
         );
 
         expect(migrationRan, isFalse);
-        expect(config.builder.engine.read([Config.schemaVersionKey]), equals(2));
+        expect(config.builder.engine.read([TypedConfig.schemaVersionKey]), equals(2));
       });
 
       test('runs sequential migrations (v1 -> v2 -> v3) on existing data', () {
         final order = <int>[];
 
-        final config = Config.inMemory(
+        final config = TypedConfig.inMemory(
           create: SampleConfig.new,
           initialData: {'schemaVersion': 1, 'legacyName': 'hello'},
           schemaVersion: 3,
@@ -101,11 +101,11 @@ void main() {
 
         expect(order, equals([2, 3]));
         expect(config.builder.engine.read(['renamedName']), equals('hello world'));
-        expect(config.builder.engine.read([Config.schemaVersionKey]), equals(3));
+        expect(config.builder.engine.read([TypedConfig.schemaVersionKey]), equals(3));
       });
 
       test('defaults unversioned initial data to v1 and runs migrations to target', () {
-        final config = Config.inMemory(
+        final config = TypedConfig.inMemory(
           create: SampleConfig.new,
           initialData: {'legacy': 'val'},
           schemaVersion: 2,
@@ -115,7 +115,7 @@ void main() {
         );
 
         expect(config.builder.engine.read(['migrated']), equals('val'));
-        expect(config.builder.engine.read([Config.schemaVersionKey]), equals(2));
+        expect(config.builder.engine.read([TypedConfig.schemaVersionKey]), equals(2));
       });
 
       test('rethrows error and invokes onError if a migration fails', () {
@@ -123,7 +123,7 @@ void main() {
         final logs = <String>[];
 
         expect(
-          () => Config.inMemory(
+          () => TypedConfig.inMemory(
             create: SampleConfig.new,
             initialData: {'schemaVersion': 1},
             schemaVersion: 2,
@@ -141,14 +141,14 @@ void main() {
       test('logs warning when schemaVersion in data is newer than current schema', () {
         final logs = <String>[];
 
-        final config = Config.inMemory(
+        final config = TypedConfig.inMemory(
           create: SampleConfig.new,
           initialData: {'schemaVersion': 5},
           schemaVersion: 2,
           onLog: logs.add,
         );
 
-        expect(config.builder.engine.read([Config.schemaVersionKey]), equals(5));
+        expect(config.builder.engine.read([TypedConfig.schemaVersionKey]), equals(5));
         expect(logs.any((l) => l.contains('newer than current version')), isTrue);
       });
     });

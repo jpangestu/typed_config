@@ -1,22 +1,38 @@
 # typed_config
 
-Manage and persist application configs (or settings, or preferences, or whatever you wanna call it) with first-class support for built-in types, enums, and custom models. Saved to disk as JSON.
+Manage and persist your application configs (or settings, or preferences, or whatever you wanna call it) with first-class support for built-in types, enums, and custom objects. Saved to disk as JSON.
 
 ## Features
 
 - **Type-Safe:** Compile-time validation prevents type mismatches and eliminates manual casting.
 - **Synchronous Reads:** In-memory cache allows instant synchronous reads.
 - **Debounced Saves:** Non-blocking, debounced file writes prevent disk thrashing during rapid state updates.
-- **Domain Groups & Auto-Namespacing:** Organize configs into sub-group (e.g., AudioSettings, UiSettings); keys are automatically namespaced (`['audio', 'volume']`) and serialize into indented nested JSON on disk.
-- **Schema Migrations:** Safely migrate configuration schemas sequentially between app releases ($v1 \rightarrow v2$).
+- **Domain Groups & Auto-Namespacing:** Organize configs into sub-groups (e.g., AudioConfig, UiConfig) that automatically serialize into clean, nested JSON on disk `({"audio": {"volume": 0.8}})`.
+- **Schema Migrations:** Safely migrate configuration schemas sequentially between app releases (v1 → v2).
+- **Reactive Streams:** Listen to real-time updates on any individual config via `entry.changes`.
 - **Crash & Corruption Recovery:** Automatically quarantines malformed or damaged JSON files with a timestamp (e.g., `.<timestamp>.corrupt`) before restoring clean defaults.
 - **Zero Framework Coupling:** Pure Dart library with no Flutter or UI dependencies.
+
+---
+
+- [Usage](#usage)
+  - [1. Define your config](#1-define-your-config)
+  - [2. Initialize once in `main()`](#2-initialize-once-in-main)
+  - [3. Read and write configs](#3-read-and-write-configs)
+  - [4. Unit Testing (In-Memory)](#4-unit-testing-in-memory)
+  - [5. Schema Migrations](#5-schema-migrations)
+- [Integrations](#integrations)
+  - [Vanilla Flutter](#vanilla-flutter) - [Provider](#provider) - [Riverpod](#riverpod)
+- [Additional information](#additional-information)
+
+---
+
 
 ## Usage
 
 ### 1. Define your config
 
-Create your configuration schema by extending `Config`. You can define individual configs or organize them into domain-driven groups using `builder.group()`:
+Create your configurations schema by extending `TypedConfig`. You can define individual configs or organize them into domain-driven groups using `builder.group()`:
 
 ```dart
 enum ThemeMode { system, light, dark }
@@ -24,23 +40,25 @@ enum ThemeMode { system, light, dark }
 // Uses Dart 3.13+ Primary Constructors (see below for Dart 3.2 – 3.12 syntax).
 
 // Main application configuration
-final class AppConfig(super.builder) extends Config {
+final class AppConfig(super.builder) extends TypedConfig {
   final language = builder.define('language', 'en');
   final autoCheckUpdates = builder.define('autoCheckUpdates', true);
 
   // If you want to organize your config into groups
-  final ui = builder.group('ui', UiSettings.new);
+  final ui = builder.group('ui', UiConfig.new);
 }
 
 // Grouped config
-final class UiSettings(super.builder) extends Config {
+final class UiConfig(super.builder) extends TypedConfig {
   final themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values);
   final compactMode = builder.define('compactMode', false);
   final fontScale = builder.define('fontScale', 1.0);
 }
 ```
 
-> **Tip:** `builder.group('ui', UiSettings.new)` automatically prefixes child keys as `['ui', 'themeMode']`, formatting into indented nested objects on disk.
+> **Tip:** `builder.group('ui', UiConfig.new)` namespaces all child entries under `"ui"`, nesting them into structured JSON on disk `({"ui": {"themeMode": ...}})` and accessed via `appConfig.ui.themeMode`.
+
+
 
 <details>
 <summary><b>Using Dart 3.2 – 3.12 (without Primary Constructors)?</b></summary>
@@ -53,24 +71,24 @@ Initializes all entries eagerly during object creation using standard constructo
 
 ```dart
 // Main application config
-final class AppConfig extends Config {
+final class AppConfig extends TypedConfig {
   final ConfigEntry<String> language;
   final ConfigEntry<bool> autoCheckUpdates;
-  final UiSettings ui;
+  final UiConfig ui;
 
   AppConfig(super.builder)
       : language = builder.define('language', 'en'),
-        autoCheckUpdates = builder.define('autoCheckUpdates', true),
-        ui = builder.group('ui', UiSettings.new);
+         autoCheckUpdates = builder.define('autoCheckUpdates', true),
+         ui = builder.group('ui', UiConfig.new);
 }
 
 // Grouped config
-final class UiSettings extends Config {
+final class UiConfig extends TypedConfig {
   final ConfigEntry<ThemeMode> themeMode;
   final ConfigEntry<bool> compactMode;
   final ConfigEntry<double> fontScale;
 
-  UiSettings(super.builder)
+  UiConfig(super.builder)
       : themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values),
         compactMode = builder.define('compactMode', false),
         fontScale = builder.define('fontScale', 1.0);
@@ -83,23 +101,24 @@ Initializes entries lazily on first access using `late final`:
 
 ```dart
 // Main application config
-final class AppConfig extends Config {
+final class AppConfig extends TypedConfig {
   AppConfig(super.builder);
 
   late final language = builder.define('language', 'en');
   late final autoCheckUpdates = builder.define('autoCheckUpdates', true);
-  late final ui = builder.group('ui', UiSettings.new);
+  late final ui = builder.group('ui', UiConfig.new);
 }
 
 // Grouped config
-final class UiSettings extends Config {
-  UiSettings(super.builder);
+final class UiConfig extends TypedConfig {
+  UiConfig(super.builder);
 
   late final themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values);
   late final compactMode = builder.define('compactMode', false);
   late final fontScale = builder.define('fontScale', 1.0);
 }
 ```
+
 </details>
 
 ### 2. Initialize once in `main()`
@@ -113,13 +132,13 @@ void main() async {
   final supportDir = await getApplicationSupportDirectory();
   final configFile = File('${supportDir.path}/config.json');
 
-  final config = await Config.initialize(
+  final appConfig = await TypedConfig.initialize(
     configFile: configFile,
     create: AppConfig.new,
     schemaVersion: 1,
   );
 
-  runApp(MyApp(config: config));
+  runApp(MyApp());
 }
 ```
 
@@ -127,23 +146,23 @@ void main() async {
 
 ```dart
 // Synchronous read (no await, no FutureBuilder, no spinners)
-final currentThemeMode = config.ui.themeMode.value;
+final currentThemeMode = appConfig.ui.themeMode.value;
 
 // Update (immediate in memory, debounced in disk save)
-config.ui.themeMode.value = ThemeMode.dark;
+appConfig.ui.themeMode.value = ThemeMode.dark;
 
 // Check if customized (useful for showing a "Reset" button)
-print(config.ui.themeMode.isModified); // true
+print(appConfig.ui.themeMode.isModified); // true
 
 // Reset back to default
-config.ui.themeMode.reset();
-print(config.ui.themeMode.isModified); // false
+appConfig.ui.themeMode.reset();
+print(appConfig.ui.themeMode.isModified); // false
 
 // Reset all configs to defaults (preserves schemaVersion)
-await config.resetAll();
+await appConfig.resetAll();
 
-// Listen to changes for a specific config
-config.ui.themeMode.changes.listen((newTheme) {
+// Listen to changes for a specific appConfig
+appConfig.ui.themeMode.changes.listen((newTheme) {
   print('Theme changed: $newTheme');
 });
 ```
@@ -155,11 +174,11 @@ Instantiate your configuration in tests without file I/O or temporary directorie
 ```dart
 void main() {
   test('theme update test', () {
-    final config = Config.inMemory(create: AppConfig.new);
+    final appConfig = TypedConfig.inMemory(create: AppConfig.new);
 
-    expect(config.ui.themeMode.value, ThemeMode.system);
-    config.ui.themeMode.value = ThemeMode.dark;
-    expect(config.ui.themeMode.value, ThemeMode.dark);
+    expect(appConfig.ui.themeMode.value, ThemeMode.system);
+    appConfig.ui.themeMode.value = ThemeMode.dark;
+    expect(appConfig.ui.themeMode.value, ThemeMode.dark);
   });
 }
 ```
@@ -167,11 +186,12 @@ void main() {
 ### 5. Schema Migrations
 
 > **Rule of Thumb:**
-> * **Adding a new setting?** You do **not** need a migration or version bump. Absent keys automatically return their `defaultValue`.
-> * **Renaming, reshaping, or converting types?** Increment `schemaVersion` and supply sequential `ConfigMigrator` handlers ($v1 \rightarrow v2 \rightarrow v3$):
+>
+> - **Adding a new setting?** You do **not** need a migration or version bump. Absent keys automatically return their `defaultValue`.
+> - **Renaming, reshaping, or converting types?** Increment `schemaVersion` and supply sequential `ConfigMigrator` handlers (v1 → v2 → v3):
 
 ```dart
-final config = await Config.initialize(
+final appConfig = await TypedConfig.initialize(
   configFile: configFile,
   create: AppConfig.new,
   schemaVersion: 2,
@@ -196,10 +216,164 @@ final config = await Config.initialize(
 
 Because typed_config is pure Dart, you can easily bridge it to Flutter or your favorite state management solution.
 
-<details>
-<summary><b>Riverpod Integration</b></summary>
+### Vanilla Flutter
 
-You can bridge typed_config into Riverpod with this lightweight extension, allowing widgets to watch individual entries without rebuilding on unrelated config changes:
+<details>
+<summary><b>View vanilla flutter setup</b></summary>
+
+Uses `InheritedWidget` for widget tree access and `StreamBuilder` for reactive widget rebuilds.
+
+#### 1. Create an `AppConfigScope` Widget
+
+```dart
+import 'package:flutter/widgets.dart';
+
+class AppConfigScope extends InheritedWidget {
+  final AppConfig appConfig;
+
+  const AppConfigScope({
+    super.key,
+    required this.appConfig,
+    required super.child,
+  });
+
+  static AppConfig of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<AppConfigScope>();
+    assert(scope != null, 'No AppConfigScope found in context');
+    return scope!.appConfig;
+  }
+
+  @override
+  bool updateShouldNotify(AppConfigScope oldWidget) => appConfig != oldWidget.appConfig;
+}
+```
+
+#### 2. Setup in `main.dart`
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final supportDir = await getApplicationSupportDirectory();
+  final appConfig = await TypedConfig.initialize(
+    configFile: File('${supportDir.path}/config.json'),
+    create: AppConfig.new,
+  );
+
+  runApp(
+    AppConfigScope(
+      appConfig: appConfig,
+      child: const MyApp(),
+    ),
+  );
+}
+```
+
+#### 3. Usage in Widgets
+
+Use `StreamBuilder` with `entry.changes` and `initialData: entry.value` to rebuild only the widgets that depend on this specific config:
+
+```dart
+class ThemeSelector extends StatelessWidget {
+  const ThemeSelector({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final appConfig = AppConfigScope.of(context);
+
+    return StreamBuilder<ThemeMode>(
+      stream: appConfig.ui.themeMode.changes,
+      initialData: appConfig.ui.themeMode.value,
+      builder: (context, snapshot) {
+        final themeMode = snapshot.requireData;
+
+        return SegmentedButton<ThemeMode>(
+          segments: const [
+            ButtonSegment(value: ThemeMode.system, label: Text('System')),
+            ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+            ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+          ],
+          selected: {themeMode},
+          onSelectionChanged: (selected) => appConfig.ui.themeMode.value = selected.first,
+        );
+      },
+    );
+  }
+}
+```
+</details>
+
+### Provider
+
+<details>
+<summary><b>View provider setup</b></summary>
+
+Exposes AppConfig to the widget tree and pairs with `StreamBuilder` for reactive widget rebuilds
+
+#### 1. Setup in `main.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:typed_config/typed_config.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final supportDir = await getApplicationSupportDirectory();
+  final appConfig = await TypedConfig.initialize(
+    configFile: File('${supportDir.path}/config.json'),
+    create: AppConfig.new,
+  );
+
+  runApp(
+    Provider<AppConfig>(
+      create: (_) => appConfig,
+      dispose: (_, appConfig) => appConfig.dispose(),
+      child: const MyApp(),
+    ),
+  );
+}
+```
+
+#### 2. Usage in Widgets
+
+```dart
+class ThemeSelector extends StatelessWidget {
+  const ThemeSelector({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final appConfig = context.watch<AppConfig>();
+
+    return StreamBuilder<ThemeMode>(
+      stream: appConfig.ui.themeMode.changes,
+      initialData: appConfig.ui.themeMode.value,
+      builder: (context, snapshot) {
+        final themeMode = snapshot.requireData;
+
+        return SegmentedButton<ThemeMode>(
+          segments: const [
+            ButtonSegment(value: ThemeMode.system, label: Text('System')),
+            ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+            ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+          ],
+          selected: {themeMode},
+          onSelectionChanged: (selected) => appConfig.ui.themeMode.value = selected.first,
+        );
+      },
+    );
+  }
+}
+```
+</details>
+
+### Riverpod
+
+<details>
+<summary><b>View riverpod setup</b></summary>
+
+Exposes `AppConfig` through `ProviderScope` and uses an `entry.provider` extension for reactive widget rebuilds.
 
 ```dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -235,7 +409,7 @@ final appConfigProvider = Provider<AppConfig>((ref) {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final config = await Config.initialize(
+  final appConfig = await TypedConfig.initialize(
     configFile: File('path/to/config.json'),
     create: AppConfig.new,
   );
@@ -244,8 +418,8 @@ void main() async {
     ProviderScope(
       overrides: [
         appConfigProvider.overrideWith((ref) {
-          ref.onDispose(config.dispose);
-          return config;
+          ref.onDispose(appConfig.dispose);
+          return appConfig;
         }),
       ],
       child: const MyApp(),
@@ -279,7 +453,6 @@ class ThemeSelector extends ConsumerWidget {
   }
 }
 ```
-
 </details>
 
 ---

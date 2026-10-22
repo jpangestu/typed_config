@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
-import 'package:typed_config/src/config.dart';
 import 'package:typed_config/src/config_builder.dart';
 import 'package:typed_config/src/config_engine.dart';
+import 'package:typed_config/src/typed_config.dart';
 
 enum TestTheme { system, light, dark }
 
@@ -29,12 +29,12 @@ class Coordinate {
   int get hashCode => x.hashCode ^ y.hashCode;
 }
 
-class NestedSubConfig extends Config {
+class NestedSubConfig extends TypedConfig {
   NestedSubConfig(super.builder);
   late final flag = builder.define('flag', true);
 }
 
-class RootTestConfig extends Config {
+class RootTestConfig extends TypedConfig {
   RootTestConfig(super.builder);
   late final nested = builder.group('sub', NestedSubConfig.new);
 }
