@@ -3,7 +3,7 @@ import 'package:typed_config/src/config_engine.dart';
 import 'package:typed_config/src/config_migrator.dart';
 import 'package:typed_config/src/typed_config.dart';
 
-class SampleConfig extends TypedConfig {
+final class SampleConfig extends TypedConfig {
   SampleConfig(super.builder);
   late final theme = builder.define('theme', 'light');
   late final user = builder.define<Map<String, dynamic>>('user', const {});

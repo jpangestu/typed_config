@@ -29,12 +29,12 @@ class Coordinate {
   int get hashCode => x.hashCode ^ y.hashCode;
 }
 
-class NestedSubConfig extends TypedConfig {
+final class NestedSubConfig extends TypedConfig {
   NestedSubConfig(super.builder);
   late final flag = builder.define('flag', true);
 }
 
-class RootTestConfig extends TypedConfig {
+final class RootTestConfig extends TypedConfig {
   RootTestConfig(super.builder);
   late final nested = builder.group('sub', NestedSubConfig.new);
 }

@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:typed_config/src/typed_config.dart';
 
-class TestConfig extends TypedConfig {
+final class TestConfig extends TypedConfig {
   TestConfig(super.builder);
   late final appName = builder.define('appName', 'DefaultApp');
   late final theme = builder.define('theme', 'system');

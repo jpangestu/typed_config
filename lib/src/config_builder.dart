@@ -12,11 +12,13 @@ final class ConfigBuilder {
   final ConfigEngine engine;
 
   /// The hierarchical key path segments prepended to entries defined in this builder.
+  @internal
   final List<String> prefixPath;
 
   /// Creates a [ConfigBuilder] with the given [engine] and [prefixPath].
+  @internal
   ConfigBuilder({
-    @internal required this.engine,
+    required this.engine,
     required this.prefixPath,
   });
 
@@ -130,20 +132,24 @@ final class ConfigBuilder {
 /// [ConfigEntry] represents a leaf node in the configuration tree:
 final class ConfigEntry<T> {
   /// The hierarchical sequence of keys identifying this entry in storage.
+  @internal
   final List<String> keyPath;
 
   /// The fallback value used when the setting is missing from storage or corrupted.
   final T defaultValue;
 
   /// Optional converter from raw JSON primitives to type [T].
+  @internal
   final T Function(dynamic json)? fromJson;
 
   /// Optional converter from type [T] to JSON-serializable primitives.
+  @internal
   final dynamic Function(T value)? toJson;
 
   final ConfigEngine _engine;
 
   /// Creates a [ConfigEntry] bound to [keyPath] and backed by [engine].
+  @internal
   ConfigEntry({
     required this.keyPath,
     required this.defaultValue,

@@ -7,7 +7,7 @@ Manage and persist your application configs (or settings, or preferences, or wha
 - **Type-Safe:** Compile-time validation prevents type mismatches and eliminates manual casting.
 - **Synchronous Reads:** In-memory cache allows instant synchronous reads.
 - **Debounced Saves:** Non-blocking, debounced file writes prevent disk thrashing during rapid state updates.
-- **Domain Groups & Auto-Namespacing:** Organize configs into sub-groups (e.g., AudioConfig, UiConfig) that automatically serialize into clean, nested JSON on disk `({"audio": {"volume": 0.8}})`.
+- **Domain Groups & Auto-Namespacing:** Organize configs into sub-groups (e.g., AudioConfig, UiConfig) that automatically serialize into clean, nested JSON on disk `{"audio": {"volume": 0.8}}`.
 - **Schema Migrations:** Safely migrate configuration schemas sequentially between app releases (v1 → v2).
 - **Reactive Streams:** Listen to real-time updates on any individual config via `entry.changes`.
 - **Crash & Corruption Recovery:** Automatically quarantines malformed or damaged JSON files with a timestamp (e.g., `.<timestamp>.corrupt`) before restoring clean defaults.

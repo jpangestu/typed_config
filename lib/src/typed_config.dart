@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io' show File, FileSystemException;
 
+import 'package:meta/meta.dart';
 import 'package:typed_config/src/config_builder.dart';
 import 'package:typed_config/src/config_engine.dart';
 import 'package:typed_config/src/config_migrator.dart';
@@ -12,14 +13,16 @@ typedef Config = TypedConfig;
 ///
 /// Extends this class to define your configs:
 /// ```dart
-/// class AppConfig(super.builder) extends TypedConfig {
+/// final class AppConfig(super.builder) extends TypedConfig {
 ///   final theme = builder.define('theme', 'system');
 ///   final volume = builder.define('volume', 0.8);
 ///   final audio = builder.group('audio', AudioConfig.new);
 /// }
 /// ```
-class TypedConfig {
+abstract base class TypedConfig {
   /// The builder context used to define entries and groups for this config.
+  @protected
+  @visibleForTesting
   final ConfigBuilder builder;
 
   /// Creates a configuration schema bound to [builder].
