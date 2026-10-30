@@ -6,6 +6,7 @@ import 'package:typed_config/src/config_builder.dart';
 import 'package:typed_config/src/config_engine.dart';
 import 'package:typed_config/src/config_migrator.dart';
 
+// TODO: remove deprecated in 1.0
 @Deprecated('Use TypedConfig instead. Will be removed in 1.0.0.')
 typedef Config = TypedConfig;
 
@@ -53,9 +54,10 @@ abstract base class TypedConfig {
   static Future<T> initialize<T extends TypedConfig>({
     required File configFile,
     required T Function(ConfigBuilder builder) create,
+    bool saveDefaultValue = ConfigEngine.defaultSaveDefaultValue,
     int schemaVersion = 1,
     Map<int, MigrationHandler>? migrations,
-    Duration? debounceDuration,
+    Duration debounceDuration = ConfigEngine.defaultDebounceDuration,
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) async {
@@ -91,6 +93,7 @@ abstract base class TypedConfig {
     final engine = ConfigEngine(
       storedConfigFile: configFile,
       inMemoryCache: inMemoryCache,
+      saveDefaultValue: saveDefaultValue,
       debounceDuration: debounceDuration,
       onLog: onLog,
       onError: onError,
@@ -105,12 +108,11 @@ abstract base class TypedConfig {
       onError: onError,
     );
 
-    // Make sure migrations is saved to disk
+    final builder = ConfigBuilder(engine: engine, prefixPath: const []);
+    final userConfig = create.call(builder);
     await engine.flush();
 
-    final builder = ConfigBuilder(engine: engine, prefixPath: const []);
-
-    return create.call(builder);
+    return userConfig;
   }
 
   /// Creates an in-memory configuration instance without file persistence.
@@ -131,9 +133,10 @@ abstract base class TypedConfig {
   static T inMemory<T extends TypedConfig>({
     required T Function(ConfigBuilder builder) create,
     Map<String, dynamic>? initialData,
+    bool saveDefaultValue = ConfigEngine.defaultSaveDefaultValue,
     int schemaVersion = 1,
     Map<int, MigrationHandler>? migrations,
-    Duration? debounceDuration,
+    Duration debounceDuration = ConfigEngine.defaultDebounceDuration,
     void Function(String message)? onLog,
     void Function(Object error, StackTrace stackTrace)? onError,
   }) {
@@ -146,6 +149,7 @@ abstract base class TypedConfig {
 
     final engine = ConfigEngine(
       inMemoryCache: inMemoryCache,
+      saveDefaultValue: saveDefaultValue,
       debounceDuration: debounceDuration,
       onLog: onLog,
       onError: onError,
@@ -221,7 +225,7 @@ abstract base class TypedConfig {
     void Function(Object error, StackTrace stackTrace)? onError,
   }) {
     if (isFirstSetup) {
-      engine.write([schemaVersionKey], schemaVersion);
+      engine.writeFirst(schemaVersionKey, schemaVersion);
       return; // Exit. Migration is not needed
     }
 
@@ -249,9 +253,10 @@ abstract base class TypedConfig {
       );
     }
 
-    if (engine.read([schemaVersionKey]) == null) {
-      engine.write([schemaVersionKey], schemaVersion);
-    }
+    // Strictly guarantees schemaVersion is at index 0 of the JSON map
+    final targetVersion =
+        currentSchemaVersion < schemaVersion ? schemaVersion : currentSchemaVersion;
+    engine.writeFirst(schemaVersionKey, targetVersion);
   }
 
   /// Immediately persists all pending in-memory configuration changes to disk.
@@ -265,7 +270,7 @@ abstract base class TypedConfig {
     final version = builder.engine.read([schemaVersionKey]);
     builder.engine.resetAll();
     if (version != null) {
-      builder.engine.write([schemaVersionKey], version);
+      builder.engine.writeFirst(schemaVersionKey, version);
     }
     await flush();
   }

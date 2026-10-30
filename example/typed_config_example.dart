@@ -108,22 +108,22 @@ Future<void> main() async {
     );
 
     // -------------------------------------------------------------------------
-    // Reading Typed Values & Checking isModified
+    // Reading Typed Values & Checking isDefault
     // -------------------------------------------------------------------------
     print('\n3. Reading strongly-typed values:');
     print(
-      '   - Language: "${appConfig.language.value}" (modified: ${appConfig.language.isModified})',
+      '   - Language: "${appConfig.language.value}" (isDefault: ${appConfig.language.isDefault})',
     );
     print(
-      '   - Auto Check Updates: ${appConfig.autoCheckUpdates.value} (modified: ${appConfig.autoCheckUpdates.isModified})',
+      '   - Auto Check Updates: ${appConfig.autoCheckUpdates.value} (isDefault: ${appConfig.autoCheckUpdates.isDefault})',
     );
     print(
-      '   - Theme Mode: ${appConfig.ui.themeMode.value} (migrated from v1, modified: ${appConfig.ui.themeMode.isModified})',
+      '   - Theme Mode: ${appConfig.ui.themeMode.value} (migrated from v1, isDefault: ${appConfig.ui.themeMode.isDefault})',
     );
     print('   - Compact Mode: ${appConfig.ui.compactMode.value}');
     print('   - Font Scale: ${appConfig.ui.fontScale.value}');
     print(
-      '   - Window Size: ${appConfig.windowSize.value} (default, modified: ${appConfig.windowSize.isModified})',
+      '   - Window Size: ${appConfig.windowSize.value} (default, isDefault: ${appConfig.windowSize.isDefault})',
     );
 
     // -------------------------------------------------------------------------
@@ -156,11 +156,11 @@ Future<void> main() async {
     // -------------------------------------------------------------------------
     print('\n6. Resetting compact mode to default...');
     print(
-      '   Compact mode before reset: ${appConfig.ui.compactMode.value} (isModified: ${appConfig.ui.compactMode.isModified})',
+      '   Compact mode before reset: ${appConfig.ui.compactMode.value} (isDefault: ${appConfig.ui.compactMode.isDefault})',
     );
     appConfig.ui.compactMode.reset();
     print(
-      '   Compact mode after reset: ${appConfig.ui.compactMode.value} (isModified: ${appConfig.ui.compactMode.isModified})',
+      '   Compact mode after reset: ${appConfig.ui.compactMode.value} (isDefault: ${appConfig.ui.compactMode.isDefault})',
     );
 
     // -------------------------------------------------------------------------

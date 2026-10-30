@@ -36,8 +36,16 @@ final class ConfigBuilder {
     T Function(dynamic json)? fromJson,
     dynamic Function(T value)? toJson,
   }) {
+    final keyPath = [...prefixPath, key];
+
+    if (engine.saveDefaultValue) {
+      final dynamic encodedDefault =
+          defaultValue != null && toJson != null ? toJson(defaultValue) : defaultValue;
+      engine.writeDefault(keyPath, encodedDefault);
+    }
+
     return ConfigEntry(
-      keyPath: [...prefixPath, key],
+      keyPath: keyPath,
       defaultValue: defaultValue,
       engine: engine,
       fromJson: fromJson,
@@ -190,10 +198,19 @@ final class ConfigEntry<T> {
   }
 
   /// Revert this entry value back to [defaultValue].
-  void reset() => _engine.remove(keyPath);
+  void reset() {
+    if (_engine.saveDefaultValue) {
+      value = defaultValue;
+    } else {
+      _engine.remove(keyPath);
+    }
+  }
 
-  /// Whether this entry has been explicitly modified.
-  bool get isModified => _engine.containsKey(keyPath);
+  @Deprecated('Use isDefault instead. Will be removed in 1.0.0.')
+  bool get isModified => !isDefault;
+
+  /// Whether this entry has default value.
+  bool get isDefault => const DeepCollectionEquality().equals(value, defaultValue);
 
   /// A broadcast stream that emits whenever this entry's value changes.
   ///

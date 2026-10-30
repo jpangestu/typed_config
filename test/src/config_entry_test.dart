@@ -92,23 +92,40 @@ void main() {
       });
     });
 
-    group('isModified and reset', () {
-      test('isModified is false initially and true after update', () {
+    group('isDefault and reset', () {
+      test('isDefault is true initially and false after update', () {
         final entry = ConfigEntry<String>(
           keyPath: ['title'],
           defaultValue: 'Untitled',
           engine: engine,
         );
 
-        expect(entry.isModified, isFalse);
+        expect(entry.isDefault, isTrue);
 
         entry.value = 'My Note';
-        expect(entry.isModified, isTrue);
+        expect(entry.isDefault, isFalse);
 
         entry.reset();
-        expect(entry.isModified, isFalse);
+        expect(entry.isDefault, isTrue);
         expect(entry.value, equals('Untitled'));
       });
+    });
+
+    test('reset sets value to defaultValue in storage when saveDefaultValue is true', () {
+      final denseEngine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: true);
+      final entry = ConfigEntry<String>(
+        keyPath: ['theme'],
+        defaultValue: 'system',
+        engine: denseEngine,
+      );
+
+      entry.value = 'dark';
+      expect(denseEngine.read(['theme']), equals('dark'));
+
+      entry.reset();
+      expect(entry.value, equals('system'));
+      expect(denseEngine.containsKey(['theme']), isTrue); // Key is retained!
+      expect(entry.isDefault, isTrue);
     });
 
     group('changes stream', () {

@@ -150,6 +150,23 @@ void main() {
         expect(diskData['appName'], equals('DisposedApp'));
       });
 
+      test('persists all default values to disk on initialize when saveDefaultValue is true',
+          () async {
+        final config = await TypedConfig.initialize(
+          configFile: configFile,
+          create: TestConfig.new,
+          saveDefaultValue: true,
+        );
+
+        final diskData = jsonDecode(await configFile.readAsString());
+        expect(diskData['appName'], equals('DefaultApp'));
+        expect(diskData['theme'], equals('system'));
+        expect(diskData['port'], equals(8080));
+        expect(diskData[TypedConfig.schemaVersionKey], equals(1));
+
+        config.dispose();
+      });
+
       test('resetAll clears entries and preserves schemaVersion on disk', () async {
         final config = await TypedConfig.initialize(
           configFile: configFile,
@@ -165,6 +182,29 @@ void main() {
         final diskData = jsonDecode(await configFile.readAsString());
         expect(diskData['appName'], isNull);
         expect(diskData[TypedConfig.schemaVersionKey], equals(3));
+
+        config.dispose();
+      });
+
+      test('schemaVersion stays first key on disk after resetAll when saveDefaultValue is true',
+          () async {
+        final config = await TypedConfig.initialize(
+          configFile: configFile,
+          create: TestConfig.new,
+          saveDefaultValue: true,
+        );
+
+        config.appName.value = 'Custom';
+        await config.flush();
+
+        await config.resetAll();
+
+        final rawJson = await configFile.readAsString();
+        final diskData = jsonDecode(rawJson) as Map<String, dynamic>;
+
+        // First key must strictly be schemaVersion
+        expect(diskData.keys.first, equals(TypedConfig.schemaVersionKey));
+        expect(diskData['appName'], equals('DefaultApp'));
 
         config.dispose();
       });

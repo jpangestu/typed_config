@@ -7,6 +7,7 @@ import 'package:collection/collection.dart';
 final class ConfigEngine {
   final File? _storedConfigFile;
   final Map<String, dynamic> _inMemoryCache;
+  final bool saveDefaultValue;
   final Duration debounceDuration;
   final void Function(String message)? onLog;
   final void Function(Object error, StackTrace stackTrace)? onError;
@@ -14,12 +15,17 @@ final class ConfigEngine {
   ConfigEngine({
     File? storedConfigFile,
     required Map<String, dynamic> inMemoryCache,
-    Duration? debounceDuration,
+    this.saveDefaultValue = defaultSaveDefaultValue,
+    this.debounceDuration = defaultDebounceDuration,
     this.onLog,
     this.onError,
   })  : _storedConfigFile = storedConfigFile,
-        _inMemoryCache = inMemoryCache,
-        debounceDuration = debounceDuration ?? const Duration(milliseconds: 300);
+        _inMemoryCache = inMemoryCache;
+
+  static const defaultSaveDefaultValue = false;
+  static const defaultDebounceDuration = Duration(milliseconds: 300);
+
+  final Map<String, dynamic> _allEntryDefaultCache = {};
   bool _isCacheNeedsSave = false;
   bool _isFlushing = false;
   Timer? _debouncedTimer;
@@ -82,6 +88,54 @@ final class ConfigEngine {
     _debouncedSave();
   }
 
+  /// Ensures that [key] is the very first entry in the root JSON map with [value].
+  void writeFirst(String key, dynamic value) {
+    // If it's already the first key and has the exact value, nothing to do
+    if (_inMemoryCache.keys.isNotEmpty && _inMemoryCache.keys.first == key) {
+      if (_inMemoryCache[key] == value) return;
+      _inMemoryCache[key] = value;
+    } else {
+      // Rebuild the map with [key] as the first entry
+      final remaining = Map<String, dynamic>.from(_inMemoryCache)..remove(key);
+      _inMemoryCache.clear();
+      _inMemoryCache[key] = value;
+      _inMemoryCache.addAll(remaining);
+    }
+
+    _isCacheNeedsSave = true;
+    if (!_changeController.isClosed) {
+      _changeController.add([key]);
+    }
+    _debouncedSave();
+  }
+
+  /// Direct reference to the raw in-memory configuration map.
+  Map<String, dynamic> get raw => _inMemoryCache;
+
+  /// Write default value for [keyPath] if [saveDefaultValue] is true cache it to [allEntriesDefaultValue].
+  void writeDefault(List<String> keyPath, dynamic encodedDefault) {
+    if (!saveDefaultValue || keyPath.isEmpty) return;
+
+    Map<String, dynamic> currentCache = _allEntryDefaultCache;
+
+    for (int i = 0; i < keyPath.length - 1; i++) {
+      final segmentKey = keyPath[i];
+      final next = currentCache[segmentKey];
+      if (next is Map<String, dynamic>) {
+        currentCache = next;
+      } else {
+        final newMap = <String, dynamic>{};
+        currentCache[segmentKey] = newMap;
+        currentCache = newMap;
+      }
+    }
+    currentCache[keyPath.last] = encodedDefault;
+
+    if (saveDefaultValue && !containsKey(keyPath)) {
+      write(keyPath, encodedDefault);
+    }
+  }
+
   void remove(List<String> keyPath) {
     if (keyPath.isEmpty) return;
 
@@ -91,10 +145,9 @@ final class ConfigEngine {
       if (currentCache is! Map) return;
       currentCache = currentCache[keyPath[i]];
     }
-    // Remove the leaf key
+
     if (currentCache is Map && currentCache.containsKey(keyPath.last)) {
       currentCache.remove(keyPath.last);
-
       _isCacheNeedsSave = true;
       if (_changeController.isClosed == false) {
         _changeController.add(keyPath);
@@ -103,12 +156,20 @@ final class ConfigEngine {
     }
   }
 
-  /// Clears all in-memory configuration overrides and notifies all key watchers.
+  /// Reset all entry to defaults if [saveDefaultValue] is true or clears it if not.
   void resetAll() {
     _inMemoryCache.clear();
+
+    // If saving defaults, restore the defaults template
+    if (saveDefaultValue && _allEntryDefaultCache.isNotEmpty) {
+      _inMemoryCache.addAll(
+        jsonDecode(jsonEncode(_allEntryDefaultCache)) as Map<String, dynamic>,
+      );
+    }
+
     _isCacheNeedsSave = true;
     if (_changeController.isClosed == false) {
-      _changeController.add(const []);
+      _changeController.add(const []); // Notify all listeners
     }
     _debouncedSave();
   }
@@ -145,9 +206,6 @@ final class ConfigEngine {
       return true;
     });
   }
-
-  /// Direct reference to the raw in-memory configuration map.
-  Map<String, dynamic> get raw => _inMemoryCache;
 
   void _debouncedSave() {
     if (_storedConfigFile == null) return;

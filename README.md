@@ -63,11 +63,8 @@ final class UiConfig(super.builder) extends TypedConfig {
 <details>
 <summary><b>Using Dart 3.2 – 3.12 (without Primary Constructors)?</b></summary>
 
-In Dart versions prior to 3.13, because standard field initializers cannot reference `builder` before construction, choose between:
+In Dart versions prior to 3.13, because standard field initializers cannot reference `builder` before construction, use Constructor Initialization:
 
-#### Option A: Constructor Initialization (Eager)
-
-Initializes all entries eagerly during object creation using standard constructor initializer lists:
 
 ```dart
 // Main application config
@@ -95,30 +92,8 @@ final class UiConfig extends TypedConfig {
 }
 ```
 
-#### Option B: Inline Field Initialization (Lazy)
-
-Initializes entries lazily on first access using `late final`:
-
-```dart
-// Main application config
-final class AppConfig extends TypedConfig {
-  AppConfig(super.builder);
-
-  late final language = builder.define('language', 'en');
-  late final autoCheckUpdates = builder.define('autoCheckUpdates', true);
-  late final ui = builder.group('ui', UiConfig.new);
-}
-
-// Grouped config
-final class UiConfig extends TypedConfig {
-  UiConfig(super.builder);
-
-  late final themeMode = builder.defineEnum('themeMode', ThemeMode.system, values: ThemeMode.values);
-  late final compactMode = builder.define('compactMode', false);
-  late final fontScale = builder.define('fontScale', 1.0);
-}
-```
-
+> [!WARNING]
+> **Avoid `late final`:** If you intend to save all of the default values to disk (`saveDefaultValue: true`), do not declare entries with `late final`. Because Dart evaluates `late` fields lazily upon first access, entries cannot register their default values at startup.
 </details>
 
 ### 2. Initialize once in `main()`
@@ -151,12 +126,12 @@ final currentThemeMode = appConfig.ui.themeMode.value;
 // Update (immediate in memory, debounced in disk save)
 appConfig.ui.themeMode.value = ThemeMode.dark;
 
-// Check if customized (useful for showing a "Reset" button)
-print(appConfig.ui.themeMode.isModified); // true
+// Check if customized (useful for showing a "Reset" button via !entry.isDefault)
+print(appConfig.ui.themeMode.isDefault); // false
 
 // Reset back to default
 appConfig.ui.themeMode.reset();
-print(appConfig.ui.themeMode.isModified); // false
+print(appConfig.ui.themeMode.isDefault); // true
 
 // Reset all configs to defaults (preserves schemaVersion)
 await appConfig.resetAll();
@@ -188,7 +163,10 @@ void main() {
 > **Rule of Thumb:**
 >
 > - **Adding a new setting?** You do **not** need a migration or version bump. Absent keys automatically return their `defaultValue`.
-> - **Renaming, reshaping, or converting types?** Increment `schemaVersion` and supply sequential `ConfigMigrator` handlers (v1 → v2 → v3):
+> - **Changing a default value in code?**
+>   - **With (`saveDefaultValue: false`):** No migration needed! Users who never modified the setting automatically inherit the new default from code.
+>   - **With (`saveDefaultValue: true`):** If you want existing users to adopt the new default, increment `schemaVersion` and update the old value in a migration (since the old default was written to their disk file).
+> - **Renaming, restructuring, or converting types?** Increment `schemaVersion` and supply sequential `ConfigMigrator` handlers (v1 → v2 → v3):
 
 ```dart
 final appConfig = await TypedConfig.initialize(

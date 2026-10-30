@@ -7,3 +7,6 @@ environment:
 dependencies:
   typed_config:
     path: ../
+
+dev_dependencies:
+  lints: ^6.0.0

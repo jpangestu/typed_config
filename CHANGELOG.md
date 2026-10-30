@@ -1,3 +1,10 @@
+## 0.2.3
+
+- Added `saveDefaultValue` option to `TypedConfig.initialize()` and `TypedConfig.inMemory()` to optionally seed and persist all default values to disk on startup.
+- Replace `isModified` with `isDefault`.
+- Updated `entry.reset()` and `typedConfig.resetAll()` to restore default values when `saveDefaultValue` is enabled.
+- Make `schemaVersion` to always be on top in the JSON output.
+
 ## 0.2.2
 
 - Renamed `Config` to `TypedConfig` and add `@Deprecated` `Config` type alias for backward compatibility.

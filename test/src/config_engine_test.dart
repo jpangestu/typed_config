@@ -107,6 +107,32 @@ void main() {
       });
     });
 
+    group('writeFirst', () {
+      test('inserts key at the very beginning of the map', () {
+        final engine = ConfigEngine(inMemoryCache: {'a': 1, 'b': 2});
+        engine.writeFirst('schemaVersion', 1);
+
+        expect(engine.raw.keys.first, equals('schemaVersion'));
+        expect(engine.raw['schemaVersion'], equals(1));
+      });
+    });
+
+    group('writeDefault', () {
+      test('caches and writes to inMemoryCache when saveDefaultValue is true', () {
+        final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: true);
+        engine.writeDefault(['ui', 'theme'], 'system');
+
+        expect(engine.read(['ui', 'theme']), equals('system'));
+      });
+
+      test('does nothing when saveDefaultValue is false', () {
+        final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: false);
+        engine.writeDefault(['ui', 'theme'], 'system');
+
+        expect(engine.read(['ui', 'theme']), isNull);
+      });
+    });
+
     group('remove', () {
       test('ignores empty keyPath', () {
         final engine = ConfigEngine(inMemoryCache: {'a': 1});
@@ -168,6 +194,19 @@ void main() {
         expect(events.first, isEmpty);
 
         await sub.cancel();
+      });
+
+      test('restores defaults when saveDefaultValue is true', () {
+        final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: true);
+        engine.writeDefault(['theme'], 'system');
+
+        // User changes value
+        engine.write(['theme'], 'dark');
+        expect(engine.read(['theme']), equals('dark'));
+
+        // Reset all should revert back to 'system', NOT empty
+        engine.resetAll();
+        expect(engine.read(['theme']), equals('system'));
       });
     });
 
