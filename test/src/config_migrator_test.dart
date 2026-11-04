@@ -1,12 +1,16 @@
 import 'package:test/test.dart';
+import 'package:typed_config/src/config_builder.dart';
 import 'package:typed_config/src/config_engine.dart';
 import 'package:typed_config/src/config_migrator.dart';
 import 'package:typed_config/src/typed_config.dart';
 
 final class SampleConfig extends TypedConfig {
-  SampleConfig(super.builder);
-  late final theme = builder.define('theme', 'light');
-  late final user = builder.define<Map<String, dynamic>>('user', const {});
+  final ConfigEntry<String> theme;
+  final ConfigEntry<Map<String, dynamic>> user;
+
+  SampleConfig(super.builder)
+      : theme = builder.define('theme', 'light'),
+        user = builder.define<Map<String, dynamic>>('user', const {});
 }
 
 void main() {

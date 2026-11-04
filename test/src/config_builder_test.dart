@@ -30,13 +30,13 @@ class Coordinate {
 }
 
 final class NestedSubConfig extends TypedConfig {
-  NestedSubConfig(super.builder);
-  late final flag = builder.define('flag', true);
+  final ConfigEntry<bool> flag;
+  NestedSubConfig(super.builder) : flag = builder.define('flag', true);
 }
 
 final class RootTestConfig extends TypedConfig {
-  RootTestConfig(super.builder);
-  late final nested = builder.group('sub', NestedSubConfig.new);
+  final NestedSubConfig nested;
+  RootTestConfig(super.builder) : nested = builder.group('sub', NestedSubConfig.new);
 }
 
 void main() {

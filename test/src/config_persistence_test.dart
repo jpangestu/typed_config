@@ -2,13 +2,16 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:typed_config/src/typed_config.dart';
+import 'package:typed_config/typed_config.dart';
 
 final class TestConfig extends TypedConfig {
-  TestConfig(super.builder);
-  late final appName = builder.define('appName', 'DefaultApp');
-  late final theme = builder.define('theme', 'system');
-  late final port = builder.define('port', 8080);
+  final ConfigEntry<String> appName;
+  final ConfigEntry<String> theme;
+  final ConfigEntry<int> port;
+  TestConfig(super.builder)
+      : appName = builder.define('appName', 'DefaultApp'),
+        theme = builder.define('theme', 'system'),
+        port = builder.define('port', 8080);
 }
 
 void main() {

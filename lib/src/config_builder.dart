@@ -130,6 +130,13 @@ final class ConfigBuilder {
   ///
   /// Entries declared within the returned group automatically have [name]
   /// prepended to their key path.
+  /// ```dart
+  /// final class AppConfig(super.builder) extends TypedConfig {
+  ///  final language = builder.define('language', 'en');
+  ///
+  ///  final ui = builder.group('ui', UiConfig.new);
+  /// }
+  /// ```
   G group<G extends TypedConfig>(String name, G Function(ConfigBuilder builder) create) {
     return create(ConfigBuilder(engine: engine, prefixPath: [...prefixPath, name]));
   }

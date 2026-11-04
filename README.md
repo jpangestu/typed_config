@@ -32,7 +32,7 @@ Manage and persist your application configs (or settings, or preferences, or wha
 
 ### 1. Define your config
 
-Create your configurations schema by extending `TypedConfig`. You can define individual configs or organize them into domain-driven groups using `builder.group()`:
+Create your configurations schema by extending `TypedConfig`. You can define individual configs or organize them into groups using `builder.group()`:
 
 ```dart
 enum ThemeMode { system, light, dark }
@@ -291,16 +291,16 @@ Exposes AppConfig to the widget tree and pairs with `StreamBuilder` for reactive
 #### 1. Setup in `main.dart`
 
 ```dart
-import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:typed_config/typed_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final supportDir = await getApplicationSupportDirectory();
   final appConfig = await TypedConfig.initialize(
-    configFile: File('${supportDir.path}/config.json'),
+    configFile: File('path/to/config.json'),
     create: AppConfig.new,
   );
 
