@@ -51,8 +51,13 @@ abstract base class TypedConfig {
   ///
   /// Changes to configs are debounced by [debounceDuration] (defaulting to 300ms)
   /// before being atomically saved to disk.
+  ///
+  /// Set [watchConfigFile] to `true` to watch [configFile] for external disk modifications.
+  /// When get edited, updates are reloaded into memory, and reactive [ConfigEntry.changes] streams
+  /// fire automatically.
   static Future<T> initialize<T extends TypedConfig>({
     required File configFile,
+    bool watchConfigFile = false,
     required T Function(ConfigBuilder builder) create,
     bool saveDefaultValue = ConfigEngine.defaultSaveDefaultValue,
     int schemaVersion = 1,
@@ -62,10 +67,10 @@ abstract base class TypedConfig {
     void Function(Object error, StackTrace stackTrace)? onError,
   }) async {
     var inMemoryCache = <String, dynamic>{};
-    final fileExisted = await configFile.exists();
+    final isFileExist = await configFile.exists();
 
     // Load configs from configFile to inMemoryCache
-    if (fileExisted) {
+    if (isFileExist) {
       try {
         final rawJson = await configFile.readAsString();
         final decodedJson = jsonDecode(rawJson);
@@ -103,7 +108,7 @@ abstract base class TypedConfig {
       engine: engine,
       schemaVersion: schemaVersion,
       migrations: migrations,
-      isFirstSetup: !fileExisted || inMemoryCache.isEmpty,
+      isFirstSetup: !isFileExist || inMemoryCache.isEmpty,
       onLog: onLog,
       onError: onError,
     );
@@ -111,6 +116,10 @@ abstract base class TypedConfig {
     final builder = ConfigBuilder(engine: engine, prefixPath: const []);
     final userConfig = create.call(builder);
     await engine.flush();
+
+    if (watchConfigFile) {
+      engine.watchConfigFile();
+    }
 
     return userConfig;
   }

@@ -10,7 +10,7 @@ Manage and persist your application configs (or settings, or preferences, or wha
 - **Domain Groups & Auto-Namespacing:** Organize configs into sub-groups (e.g., AudioConfig, UiConfig) that automatically serialize into clean, nested JSON on disk `{"audio": {"volume": 0.8}}`.
 - **Schema Migrations:** Safely migrate configuration schemas sequentially between app releases (v1 → v2).
 - **Reactive Streams:** Listen to real-time updates on any individual config via `entry.changes`.
-- **Crash & Corruption Recovery:** Automatically quarantines malformed or damaged JSON files with a timestamp (e.g., `.<timestamp>.corrupt`) before restoring clean defaults.
+- **Live File Watching:** Automatically reload changes when the config file is edited externally (e.g. by users in text editors or external tools) without restarting the app.
 - **Zero Framework Coupling:** Pure Dart library with no Flutter or UI dependencies.
 
 ---
@@ -109,7 +109,9 @@ void main() async {
 
   final appConfig = await TypedConfig.initialize(
     configFile: configFile,
+    watchConfigFile: false,
     create: AppConfig.new,
+    saveDefaultValue: false,
     schemaVersion: 1,
   );
 

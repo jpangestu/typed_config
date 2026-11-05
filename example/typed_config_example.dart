@@ -91,12 +91,13 @@ Future<void> main() async {
     print('   ${await configFile.readAsString()}\n');
 
     // -------------------------------------------------------------------------
-    // Initialize with Schema Migration to Version 2
+    // Initialize with Schema Migration to Version 2 & Live File Watching
     // -------------------------------------------------------------------------
-    print('2. Initializing AppConfig with schemaVersion: 2 & migrations...');
+    print('2. Initializing AppConfig with schemaVersion: 2, migrations & watchConfigFile: true...');
     final appConfig = await TypedConfig.initialize(
       configFile: configFile,
       create: AppConfig.new,
+      watchConfigFile: true,
       schemaVersion: 2,
       migrations: {
         2: (migrator) {
@@ -138,10 +139,14 @@ Future<void> main() async {
       print('   -> [Stream Event] UI font scale updated to: $newScale');
     });
 
+    final languageSubscription = appConfig.language.changes.listen((newLang) {
+      print('   -> [Stream Event] Language updated to: $newLang');
+    });
+
     // -------------------------------------------------------------------------
-    // Updating Settings
+    // Updating Settings Programmatically
     // -------------------------------------------------------------------------
-    print('\n5. Updating settings...');
+    print('\n5. Updating settings programmatically...');
     appConfig.ui.themeMode.value = ThemeMode.light;
     appConfig.ui.compactMode.value = true;
     appConfig.ui.fontScale.value = 1.25;
@@ -175,9 +180,23 @@ Future<void> main() async {
     print(encoder.convert(diskContent));
 
     // -------------------------------------------------------------------------
+    // Live File Watching: External Edit Simulation
+    // -------------------------------------------------------------------------
+    print('\n8. Simulating an external edit to config.json (e.g. from VS Code)...');
+    final externalEdit = Map<String, dynamic>.from(diskContent);
+    externalEdit['language'] = 'ja';
+    (externalEdit['ui'] as Map<String, dynamic>)['fontScale'] = 1.75;
+    await configFile.writeAsString(encoder.convert(externalEdit));
+
+    // Allow watcher debounce and event delivery to complete
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    print('   - In-memory Language after external edit: ${appConfig.language.value}');
+    print('   - In-memory Font Scale after external edit: ${appConfig.ui.fontScale.value}');
+
+    // -------------------------------------------------------------------------
     // In-Memory Mode (For Tests / Headless)
     // -------------------------------------------------------------------------
-    print('\n8. In-Memory Mode (Testing without touching disk):');
+    print('\n9. In-Memory Mode (Testing without touching disk):');
     final testConfig = TypedConfig.inMemory(
       create: AppConfig.new,
       initialData: {
@@ -193,9 +212,10 @@ Future<void> main() async {
     // -------------------------------------------------------------------------
     // Cleanup & Disposal
     // -------------------------------------------------------------------------
-    print('\n9. Disposing config and cleaning up resources...');
+    print('\n10. Disposing config and cleaning up resources...');
     await themeSubscription.cancel();
     await fontSubscription.cancel();
+    await languageSubscription.cancel();
     appConfig.dispose();
 
     print('\n=== All typed_config features demonstrated successfully! ===');

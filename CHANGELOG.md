@@ -1,3 +1,7 @@
+## 0.2.4
+
+- Added `watchConfigFile` option to `TypedConfig.initialize()` to automatically detect external disk modifications and reload changes into memory.
+
 ## 0.2.3
 
 - Added `saveDefaultValue` option to `TypedConfig.initialize()` and `TypedConfig.inMemory()` to optionally seed and persist all default values to disk on startup.

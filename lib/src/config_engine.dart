@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show File, FileSystemException;
+import 'dart:io';
 
 import 'package:collection/collection.dart';
+import 'package:meta/meta.dart';
 
 final class ConfigEngine {
   final File? _storedConfigFile;
@@ -26,10 +27,18 @@ final class ConfigEngine {
   static const defaultDebounceDuration = Duration(milliseconds: 300);
 
   final Map<String, dynamic> _allEntryDefaultCache = {};
-  bool _isCacheNeedsSave = false;
-  bool _isFlushing = false;
   Timer? _debouncedTimer;
   final StreamController<List<String>> _changeController = StreamController.broadcast();
+  bool _isCacheNeedsSave = false;
+
+  bool _isFlushing = false;
+  String? _lastFlushedContent;
+
+  StreamSubscription<FileSystemEvent>? _configFileWatcherSub;
+  Timer? _configFileReloadTimer;
+
+  /// Whether the configuration file is actively being watched for external changes.
+  bool get isWatchingConfigFile => _configFileWatcherSub != null;
 
   // Add typed_config for each log
   void _log(String message) {
@@ -207,6 +216,96 @@ final class ConfigEngine {
     });
   }
 
+  /// Starts watching [storedConfigFile] for external modifications.
+  ///
+  /// Watches the parent directory to detect in-place edits as well as atomic
+  /// file save (safe saves) performed by modern text editors.
+  void watchConfigFile({Duration debounceDuration = const Duration(milliseconds: 100)}) {
+    final configFile = _storedConfigFile;
+    if (configFile == null || _configFileWatcherSub != null) return;
+
+    final parentDir = configFile.parent;
+    if (!parentDir.existsSync()) {
+      parentDir.createSync(recursive: true);
+    }
+
+    bool isTargetFile(String path) {
+      return File(path).absolute.path.replaceAll(r'\', '/') ==
+          configFile.absolute.path.replaceAll(r'\', '/');
+    }
+
+    _configFileWatcherSub = parentDir.watch().listen(
+      (event) {
+        // Match direct modifications as well as move/rename destinations (atomic editor saves)
+        bool isTarget = isTargetFile(event.path);
+        if (!isTarget && event is FileSystemMoveEvent && event.destination != null) {
+          isTarget = isTargetFile(event.destination!);
+        }
+
+        // Ignore unrelated files or events triggered by internal flushes
+        if (!isTarget || _isFlushing) return;
+
+        _configFileReloadTimer?.cancel();
+        _configFileReloadTimer = Timer(debounceDuration, _handleExternalFileChange);
+      },
+      onError: (Object error, StackTrace stackTrace) => onError?.call(error, stackTrace),
+    );
+  }
+
+  Future<void> _handleExternalFileChange() async {
+    final configFile = _storedConfigFile;
+    if (_isFlushing || configFile == null) return;
+
+    String? content;
+    // Retry briefly to handle transient file lock contention (common on Windows during editor saves)
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (!await configFile.exists()) return;
+        content = await configFile.readAsString();
+        break;
+      } on FileSystemException {
+        if (attempt == 2) return;
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      }
+    }
+
+    // Echo prevention: ignore if file content matches what we last flushed
+    if (content == null || content == _lastFlushedContent) return;
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(content);
+    } catch (e, s) {
+      onError?.call(e, s);
+      return;
+    }
+
+    if (decoded is! Map<String, dynamic>) {
+      onError?.call(
+        const FormatException('Config file content is not a JSON object.'),
+        StackTrace.current,
+      );
+      return;
+    }
+
+    // Disk wins: cancel pending debounced saves, update cache, and dispatch events to streams
+    _debouncedTimer?.cancel();
+    _isCacheNeedsSave = false;
+    _lastFlushedContent = content;
+
+    final changedPaths = diffKeyPaths(_inMemoryCache, decoded);
+    _inMemoryCache.clear();
+    _inMemoryCache.addAll(decoded);
+
+    if (!_changeController.isClosed) {
+      for (final path in changedPaths) {
+        _changeController.add(path);
+      }
+    }
+
+    _log('Reloaded configuration from disk (${changedPaths.length} setting(s) changed).');
+  }
+
   void _debouncedSave() {
     if (_storedConfigFile == null) return;
 
@@ -243,6 +342,7 @@ final class ConfigEngine {
       }
 
       _isCacheNeedsSave = false;
+      _lastFlushedContent = encodedCache;
       _log('Saved configuration to ${_storedConfigFile.path}');
     } catch (e, s) {
       try {
@@ -255,6 +355,8 @@ final class ConfigEngine {
   }
 
   void dispose() {
+    _configFileReloadTimer?.cancel();
+    _configFileWatcherSub?.cancel();
     _debouncedTimer?.cancel();
     _changeController.close();
 
@@ -269,10 +371,52 @@ final class ConfigEngine {
         _storedConfigFile.writeAsStringSync(encodedCache, flush: true);
 
         _isCacheNeedsSave = false;
+        _lastFlushedContent = encodedCache;
         _log('Synchronously saved configuration on dispose.');
       } catch (e, s) {
         onError?.call(e, s);
       }
     }
   }
+}
+
+/// Recursively computes which key paths changed between [oldMap] and [newMap].
+@internal
+@visibleForTesting
+List<List<String>> diffKeyPaths(
+  Map<String, dynamic> oldMap,
+  Map<String, dynamic> newMap, {
+  List<String> prefix = const [],
+}) {
+  final changedPaths = <List<String>>[];
+  final allKeys = {...oldMap.keys, ...newMap.keys};
+
+  for (final key in allKeys) {
+    final currentPath = [...prefix, key];
+    final hasOld = oldMap.containsKey(key);
+    final hasNew = newMap.containsKey(key);
+
+    if (!hasOld && hasNew) {
+      changedPaths.add(currentPath);
+    } else if (hasOld && !hasNew) {
+      changedPaths.add(currentPath);
+    } else {
+      final oldVal = oldMap[key];
+      final newVal = newMap[key];
+
+      if (oldVal is Map && newVal is Map) {
+        changedPaths.addAll(
+          diffKeyPaths(
+            Map<String, dynamic>.from(oldVal),
+            Map<String, dynamic>.from(newVal),
+            prefix: currentPath,
+          ),
+        );
+      } else if (!const DeepCollectionEquality().equals(oldVal, newVal)) {
+        changedPaths.add(currentPath);
+      }
+    }
+  }
+
+  return changedPaths;
 }
