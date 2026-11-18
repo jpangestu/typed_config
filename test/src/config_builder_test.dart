@@ -104,7 +104,7 @@ void main() {
     });
 
     group('defineList', () {
-      test('handles primitive lists (String, int)', () {
+      test('handles lists of String and int', () {
         final tags = builder.defineList<String>('tags', ['initial']);
         expect(tags.value, equals(['initial']));
 
@@ -145,6 +145,111 @@ void main() {
         final tags = builder.defineList<String>('tags', ['default']);
         engine.write(['tags'], 'not_a_list');
         expect(tags.value, equals(['default']));
+      });
+    });
+
+    group('defineMap', () {
+      test('handles String keys and values', () {
+        final shortcuts = builder.defineMap<String, String>(
+          'shortcuts',
+          {'save': 'Ctrl+S'},
+        );
+
+        expect(shortcuts.value, equals({'save': 'Ctrl+S'}));
+
+        shortcuts.value = {'save': 'Ctrl+Shift+S', 'quit': 'Ctrl+Q'};
+        expect(shortcuts.value, equals({'save': 'Ctrl+Shift+S', 'quit': 'Ctrl+Q'}));
+        expect(
+          engine.read(['shortcuts']),
+          equals({'save': 'Ctrl+Shift+S', 'quit': 'Ctrl+Q'}),
+        );
+      });
+
+      test('handles int keys automatically', () {
+        final statusCodes = builder.defineMap<int, String>(
+          'status',
+          {200: 'OK'},
+        );
+
+        expect(statusCodes.value, equals({200: 'OK'}));
+
+        // Simulating JSON where keys on disk are strings
+        engine.write(['status'], {'404': 'Not Found', '500': 'Error'});
+        expect(statusCodes.value, equals({404: 'Not Found', 500: 'Error'}));
+
+        statusCodes.value = {201: 'Created'};
+        expect(engine.read(['status']), equals({'201': 'Created'}));
+      });
+
+      test('handles double keys and coerces double values', () {
+        final speeds = builder.defineMap<double, double>(
+          'speeds',
+          {1.0: 1.0},
+        );
+
+        // Simulating JSON with numeric strings as keys and int/num as values
+        engine.write(['speeds'], {'1.5': 2, '2.0': 2.5});
+        expect(speeds.value, equals({1.5: 2.0, 2.0: 2.5}));
+      });
+
+      test('handles enum keys with enumValues', () {
+        final themeScales = builder.defineMap<TestTheme, double>(
+          'themeScales',
+          {TestTheme.system: 1.0},
+          enumValues: TestTheme.values,
+        );
+
+        expect(themeScales.value, equals({TestTheme.system: 1.0}));
+
+        themeScales.value = {TestTheme.light: 1.1, TestTheme.dark: 0.9};
+        expect(
+          engine.read(['themeScales']),
+          equals({'light': 1.1, 'dark': 0.9}),
+        );
+
+        // Simulating reading from disk
+        engine.write(['themeScales'], {'system': 1.2});
+        expect(themeScales.value, equals({TestTheme.system: 1.2}));
+      });
+
+      test('handles custom object values with valueFromJson and valueToJson', () {
+        final coords = builder.defineMap<String, Coordinate>(
+          'positions',
+          {'origin': const Coordinate(0, 0)},
+          valueFromJson: Coordinate.fromJson,
+          valueToJson: (c) => c.toJson(),
+        );
+
+        expect(coords.value, equals({'origin': const Coordinate(0, 0)}));
+
+        coords.value = {'target': const Coordinate(10, 20)};
+        expect(
+          engine.read(['positions']),
+          equals({
+            'target': {'x': 10, 'y': 20},
+          }),
+        );
+        expect(coords.value, equals({'target': const Coordinate(10, 20)}));
+      });
+
+      test('falls back to defaultValue when stored value is not a map', () {
+        final shortcuts = builder.defineMap<String, String>(
+          'shortcuts',
+          {'save': 'Ctrl+S'},
+        );
+
+        engine.write(['shortcuts'], 'not_a_map');
+        expect(shortcuts.value, equals({'save': 'Ctrl+S'}));
+      });
+
+      test('asserts when unsupported key type is used without enumValues', () {
+        expect(
+          () => builder.defineMap<Coordinate, String>(
+            'invalid',
+            {},
+          ),
+          throwsA(isA<AssertionError>()),
+        );
       });
     });
 

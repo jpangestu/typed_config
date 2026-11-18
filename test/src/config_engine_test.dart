@@ -108,28 +108,40 @@ void main() {
     });
 
     group('writeFirst', () {
-      test('inserts key at the very beginning of the map', () {
-        final engine = ConfigEngine(inMemoryCache: {'a': 1, 'b': 2});
+      test('prepends key to empty map', () {
+        final engine = ConfigEngine(inMemoryCache: {});
         engine.writeFirst('schemaVersion', 1);
 
         expect(engine.raw.keys.first, equals('schemaVersion'));
-        expect(engine.raw['schemaVersion'], equals(1));
-      });
-    });
-
-    group('writeDefault', () {
-      test('caches and writes to inMemoryCache when saveDefaultValue is true', () {
-        final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: true);
-        engine.writeDefault(['ui', 'theme'], 'system');
-
-        expect(engine.read(['ui', 'theme']), equals('system'));
+        expect(engine.read(['schemaVersion']), equals(1));
       });
 
-      test('does nothing when saveDefaultValue is false', () {
-        final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: false);
-        engine.writeDefault(['ui', 'theme'], 'system');
+      test('prepends key to non-empty map maintaining key order for remaining', () {
+        final engine = ConfigEngine(inMemoryCache: {'theme': 'dark', 'volume': 0.8});
+        engine.writeFirst('schemaVersion', 2);
 
-        expect(engine.read(['ui', 'theme']), isNull);
+        expect(engine.raw.keys.toList(), equals(['schemaVersion', 'theme', 'volume']));
+        expect(engine.read(['schemaVersion']), equals(2));
+      });
+
+      test('moves existing key to the first position', () {
+        final engine = ConfigEngine(inMemoryCache: {'theme': 'dark', 'schemaVersion': 1});
+        engine.writeFirst('schemaVersion', 2);
+
+        expect(engine.raw.keys.toList(), equals(['schemaVersion', 'theme']));
+        expect(engine.read(['schemaVersion']), equals(2));
+      });
+
+      test('does nothing if key is already first with same value', () async {
+        final engine = ConfigEngine(inMemoryCache: {'schemaVersion': 1, 'theme': 'dark'});
+        final events = <List<String>>[];
+        final sub = engine.watchKey(['schemaVersion']).listen(events.add);
+
+        engine.writeFirst('schemaVersion', 1);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(events, isEmpty);
+        await sub.cancel();
       });
     });
 
@@ -140,63 +152,89 @@ void main() {
         expect(engine.raw, equals({'a': 1}));
       });
 
-      test('removes top-level key and notifies stream', () async {
+      test('removes top-level key and notifies listeners', () async {
         final engine = ConfigEngine(inMemoryCache: {'theme': 'dark'});
         final events = <List<String>>[];
         final sub = engine.watchKey(['theme']).listen(events.add);
 
         engine.remove(['theme']);
-        expect(engine.containsKey(['theme']), isFalse);
-
         await Future<void>.delayed(Duration.zero);
+
+        expect(engine.read(['theme']), isNull);
         expect(events, hasLength(1));
         expect(events.first, equals(['theme']));
 
         await sub.cancel();
       });
 
-      test('removes nested leaf key', () {
+      test('removes deeply nested key', () {
         final engine = ConfigEngine(
           inMemoryCache: {
             'ui': {'theme': 'dark', 'scale': 1.0},
           },
         );
+
         engine.remove(['ui', 'theme']);
-        expect(engine.containsKey(['ui', 'theme']), isFalse);
+        expect(engine.read(['ui', 'theme']), isNull);
         expect(engine.read(['ui', 'scale']), equals(1.0));
       });
 
-      test('does nothing if path does not exist', () {
-        final engine = ConfigEngine(inMemoryCache: {'a': 1});
+      test('does not throw or notify if key does not exist', () async {
+        final engine = ConfigEngine(inMemoryCache: {'theme': 'dark'});
+        final events = <List<String>>[];
+        final sub = engine.watchKey(['missing']).listen(events.add);
+
         engine.remove(['missing']);
-        engine.remove(['missing', 'sub']);
-        expect(engine.raw, equals({'a': 1}));
+        await Future<void>.delayed(Duration.zero);
+
+        expect(events, isEmpty);
+        await sub.cancel();
       });
     });
 
-    group('resetAll', () {
-      test('clears entire cache and emits empty path to watchers', () async {
+    group('writeDefault and resetAll', () {
+      test('writeDefault does nothing when saveDefaultValue is false', () {
+        final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: false);
+        engine.writeDefault(['theme'], 'system');
+
+        expect(engine.read(['theme']), isNull);
+      });
+
+      test('writeDefault writes to inMemoryCache if key is missing when saveDefaultValue is true',
+          () {
+        final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: true);
+        engine.writeDefault(['theme'], 'system');
+
+        expect(engine.read(['theme']), equals('system'));
+      });
+
+      test('writeDefault does not overwrite existing user value in inMemoryCache', () {
+        final engine = ConfigEngine(inMemoryCache: {'theme': 'dark'}, saveDefaultValue: true);
+        engine.writeDefault(['theme'], 'system');
+
+        expect(engine.read(['theme']), equals('dark'));
+      });
+
+      test('resetAll clears entire cache and emits empty path to watchers', () async {
         final engine = ConfigEngine(
-          inMemoryCache: {
-            'a': 1,
-            'b': {'c': 2},
-          },
+          inMemoryCache: {'theme': 'dark', 'scale': 1.0},
+          saveDefaultValue: false,
         );
 
         final events = <List<String>>[];
-        final sub = engine.watchKey(['b', 'c']).listen(events.add);
+        final sub = engine.watchKey(['theme']).listen(events.add);
 
         engine.resetAll();
-        expect(engine.raw, isEmpty);
-
         await Future<void>.delayed(Duration.zero);
+
+        expect(engine.raw, isEmpty);
         expect(events, hasLength(1));
-        expect(events.first, isEmpty);
+        expect(events.first, isEmpty); // Empty list matches all watchers
 
         await sub.cancel();
       });
 
-      test('restores defaults when saveDefaultValue is true', () {
+      test('resetAll restores defaults when saveDefaultValue is true', () {
         final engine = ConfigEngine(inMemoryCache: {}, saveDefaultValue: true);
         engine.writeDefault(['theme'], 'system');
 
@@ -257,6 +295,25 @@ void main() {
 
         expect(events, hasLength(1));
         expect(events.first, equals(['ui']));
+
+        await sub.cancel();
+      });
+
+      test('emits when a child key is modified (e.g. map subkey)', () async {
+        final engine = ConfigEngine(
+          inMemoryCache: {
+            'shortcuts': {'save': 'Ctrl+S'},
+          },
+        );
+
+        final events = <List<String>>[];
+        final sub = engine.watchKey(['shortcuts']).listen(events.add);
+
+        engine.write(['shortcuts', 'save'], 'Ctrl+Shift+S');
+        await Future<void>.delayed(Duration.zero);
+
+        expect(events, hasLength(1));
+        expect(events.first, equals(['shortcuts', 'save']));
 
         await sub.cancel();
       });

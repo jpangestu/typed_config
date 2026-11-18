@@ -27,9 +27,8 @@ final class ConfigBuilder {
   /// [key] is the name of the config at the current hierarchy level.
   /// [defaultValue] is used when the config is invalid or missing from storage.
   ///
-  /// Provide [fromJson] and [toJson] for custom objects or types that need
-  /// conversion to and from JSON. Built-in types (int, double, string, bool)
-  /// will be handled automatically.
+  /// Provide [fromJson] and [toJson] for custom objects or types that need conversion to and from
+  /// JSON. Standard types (`String`, `int`, `double`, `bool`) will be handled automatically.
   ConfigEntry<T> define<T>(
     String key,
     T defaultValue, {
@@ -88,7 +87,7 @@ final class ConfigBuilder {
 
   /// Defines a list configuration entry, automatically casting elements from JSON.
   ///
-  /// For primitive lists (e.g. `String`, `int`, `double`), no converters are needed:
+  /// For lists of `String`, `int`, `double`, or `bool`, no converters are needed:
   /// ```dart
   /// final tags = builder.defineList('tags', ['home', 'work']);
   /// ```
@@ -126,6 +125,81 @@ final class ConfigBuilder {
     );
   }
 
+  /// Defines a map configuration entry with `String`, `int`, `double`, or `Enum` keys.
+  ///
+  /// For enum keys, pass the enum's static `.values` list to [enumValues]:
+  /// ```dart
+  /// final themeBrightness = builder.defineMap<ThemeMode, double>(
+  ///   'themeBrightness',
+  ///   {ThemeMode.dark: 0.8},
+  ///   enumValues: ThemeMode.values,
+  /// );
+  /// ```
+  ///
+  /// For custom object values, provide [valueFromJson] and [valueToJson]:
+  /// ```dart
+  /// final profiles = builder.defineMap<String, UserProfile>(
+  ///   'profiles',
+  ///   {},
+  ///   valueFromJson: UserProfile.fromJson,
+  ///   valueToJson: (p) => p.toJson(),
+  /// );
+  /// ```
+  ConfigEntry<Map<K, V>> defineMap<K, V>(
+    String key,
+    Map<K, V> defaultValue, {
+    Iterable<Enum>? enumValues,
+    V Function(dynamic json)? valueFromJson,
+    dynamic Function(V value)? valueToJson,
+  }) {
+    assert(
+      K == String || K == int || K == double || K == num || enumValues != null,
+      'Keys in defineMap must be String, int, double, num, or an Enum with enumValues provided.',
+    );
+
+    final enumLookup = enumValues != null ? {for (final e in enumValues) e.name: e as K} : null;
+
+    return define<Map<K, V>>(
+      key,
+      defaultValue,
+      fromJson: (json) {
+        if (json is! Map) return defaultValue;
+
+        K? parseKey(dynamic rawKey) {
+          final str = rawKey.toString();
+          if (enumLookup != null) return enumLookup[str];
+          if (K == String) return str as K;
+          if (K == int) return int.tryParse(str) as K?;
+          if (K == double) return double.tryParse(str) as K?;
+          if (K == num) return num.tryParse(str) as K?;
+          return null;
+        }
+
+        V? parseValue(dynamic rawValue) {
+          if (valueFromJson != null) return valueFromJson(rawValue);
+          if (V == double && rawValue is num) return rawValue.toDouble() as V;
+          if (rawValue is V) return rawValue;
+          return null;
+        }
+
+        final result = <K, V>{};
+        for (final entry in json.entries) {
+          final k = parseKey(entry.key);
+          final v = parseValue(entry.value);
+          if (k != null && v != null) {
+            result[k] = v;
+          }
+        }
+        return result;
+      },
+      toJson: (map) => map.map((k, v) {
+        final jsonKey = k is Enum ? k.name : k.toString();
+        final jsonValue = valueToJson != null ? valueToJson(v) : (v is Enum ? v.name : v);
+        return MapEntry(jsonKey, jsonValue);
+      }),
+    );
+  }
+
   /// Instantiates a nested [TypedConfig] group under the namespace [name].
   ///
   /// Entries declared within the returned group automatically have [name]
@@ -153,11 +227,11 @@ final class ConfigEntry<T> {
   /// The fallback value used when the setting is missing from storage or corrupted.
   final T defaultValue;
 
-  /// Optional converter from raw JSON primitives to type [T].
+  /// Optional converter from raw JSON values (`Map`, `List`, `String`, `num`, `bool`) to type [T].
   @internal
   final T Function(dynamic json)? fromJson;
 
-  /// Optional converter from type [T] to JSON-serializable primitives.
+  /// Optional converter from type [T] to JSON-serializable values.
   @internal
   final dynamic Function(T value)? toJson;
 

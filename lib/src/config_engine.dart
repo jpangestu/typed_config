@@ -201,15 +201,18 @@ final class ConfigEngine {
   ///
   /// Emits the `changedPath` whenever:
   /// - An exact match occurs (the entry at [keyPath] itself was modified or removed).
+  /// - A child key within [keyPath] is modified (e.g. editing `['shortcuts', 'save']`
+  ///   when watching `['shortcuts']`).
   /// - A parent group path is overwritten or removed (e.g. writing `['audio']` when watching
   ///   `['audio', 'volume']`).
   /// - All settings were cleared via [resetAll] (emitting an empty list `const []`).
   Stream<List<String>> watchKey(List<String> keyPath) {
     return _changeController.stream.where((changedPath) {
       if (changedPath.isEmpty) return true;
-      if (changedPath.length > keyPath.length) return false;
 
-      for (int i = 0; i < changedPath.length; i++) {
+      // Match if changedPath is a parent of keyPath OR keyPath is a prefix of changedPath
+      final minLength = changedPath.length < keyPath.length ? changedPath.length : keyPath.length;
+      for (int i = 0; i < minLength; i++) {
         if (keyPath[i] != changedPath[i]) return false;
       }
       return true;

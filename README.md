@@ -1,6 +1,17 @@
 # typed_config
 
-Manage and persist your application configs (or settings, or preferences, or whatever you wanna call it) with first-class support for built-in types, enums, and custom objects. Saved to disk as JSON.
+Manage and persist your application configs (or settings, or preferences, or whatever you wanna call it) with first-class support for many built-in types and custom objects. Saved to disk as JSON.
+
+### Supported Types
+
+| Type | How to Define |
+| :--- | :--- |
+| `String`, `bool`, `int`, `double` | `builder.define('volume', 0.8)` |
+| `Enum` | `builder.defineEnum('theme', ThemeMode.system, values: ThemeMode.values)` |
+| `List<T>` | `builder.defineList('tags', ['home', 'work'])` |
+| `Map<K, V>` | `builder.defineMap('shortcuts', {'save': 'Ctrl+S'})` |
+| Custom Objects (`DateTime`, classes) | `builder.define('user', user, fromJson: ..., toJson: ...)`|
+
 
 ## Features
 
@@ -56,7 +67,7 @@ final class UiConfig(super.builder) extends TypedConfig {
 }
 ```
 
-> **Tip:** `builder.group('ui', UiConfig.new)` namespaces all child entries under `"ui"`, nesting them into structured JSON on disk `({"ui": {"themeMode": ...}})` and accessed via `appConfig.ui.themeMode`.
+> **Tip:** `builder.group('ui', UiConfig.new)` namespaces all child entries under `"ui"`, nesting them into structured JSON on disk `({"ui": {"themeMode": ...}})` and can be accessed with `appConfig.ui.themeMode`.
 
 
 

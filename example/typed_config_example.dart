@@ -44,7 +44,7 @@ final class UiConfig(super.builder) extends TypedConfig {
 
 /// Main application configuration.
 final class AppConfig(super.builder) extends TypedConfig {
-  // Standard built-in type configs (String, bool, int, double)
+  // (String, bool, int, double)
   final language = builder.define('language', 'en');
   final autoCheckUpdates = builder.define('autoCheckUpdates', true);
 
@@ -56,8 +56,14 @@ final class AppConfig(super.builder) extends TypedConfig {
     toJson: (size) => size.toJson(),
   );
 
-  // List of built-in types
+  // List of (String, bool, int, double)
   final recentFiles = builder.defineList<String>('recentFiles', const []);
+
+  // Map of key-value pairs (e.g. keyboard shortcuts)
+  final shortcuts = builder.defineMap<String, String>('shortcuts', {
+    'save': 'Ctrl+S',
+    'quit': 'Ctrl+Q',
+  });
 
   // Nested config group
   final ui = builder.group('ui', UiConfig.new);
@@ -126,6 +132,7 @@ Future<void> main() async {
     print(
       '   - Window Size: ${appConfig.windowSize.value} (default, isDefault: ${appConfig.windowSize.isDefault})',
     );
+    print('   - Shortcuts: ${appConfig.shortcuts.value}');
 
     // -------------------------------------------------------------------------
     // Subscribing to Reactive Changes
@@ -152,6 +159,7 @@ Future<void> main() async {
     appConfig.ui.fontScale.value = 1.25;
     appConfig.windowSize.value = const WindowSize(1920, 1080);
     appConfig.recentFiles.value = ['/docs/report.pdf', '/docs/notes.txt'];
+    appConfig.shortcuts.value = {'save': 'Ctrl+Shift+S', 'quit': 'Ctrl+Q'};
 
     // Give streams a moment to deliver events
     await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -201,10 +209,12 @@ Future<void> main() async {
       create: AppConfig.new,
       initialData: {
         'language': 'fr',
+        'shortcuts': {'save': 'Cmd+S'},
         'ui': {'compactMode': true},
       },
     );
     print('   - In-memory Language: ${testConfig.language.value}');
+    print('   - In-memory Shortcuts: ${testConfig.shortcuts.value}');
     print('   - In-memory Compact Mode: ${testConfig.ui.compactMode.value}');
     print('   - In-memory Theme Mode: ${testConfig.ui.themeMode.value} (default)');
     testConfig.dispose();
